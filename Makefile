@@ -19,9 +19,9 @@ PROJECT_NAME := bfstore
 COMPOSE_FILE := docker-compose.yaml
 DOCKER_COMPOSE := docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE)
 
-MYSQL_ROOT_PASSWORD ?= bfstore_root_password
+MYSQL_ROOT_PASSWORD := bfstore_root_password
 MYSQL_INIT_PATH ?= deploy/local/mysql/init
-MYSQL_VOLUME ?= $(PROJECT_NAME)_bfstore_mysql_data
+MYSQL_VOLUME := $(PROJECT_NAME)_bfstore_mysql_data
 
 BASKET_MIGRATIONS_PATH ?= db/basket/migrations
 BASKET_DATABASE_URL ?= mysql://bfstore_basket:bfstore_basket_password@tcp(localhost:3306)/bfstore_basket?multiStatements=true&parseTime=true
