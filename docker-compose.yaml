@@ -1,5 +1,4 @@
 services:
-  services:
   mysql:
     image: mysql:8.4
     container_name: bfstore-mysql
@@ -11,7 +10,7 @@ services:
       - bfstore-mysql-data:/var/lib/mysql
       - ./deploy/local/mysql/init:/docker-entrypoint-initdb.d:ro
     networks:
-      - bfstore-local
+      - bfstore
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pbfstore_root_password"]
       interval: 5s
