@@ -17,29 +17,15 @@ remove item
 clear basket
 ```
 
-## Design corrections
-
-This version includes three important corrections:
-
-```text
-CreateBasket is included in the first iteration.
-Money values use the shared bfstore.common.v1.Money message.
-All timestamps use google.protobuf.Timestamp.
-```
-
-The API contract should not use raw `int64` money fields where a shared `Money` type already exists.
-
-The API contract should not use `string` timestamps where `google.protobuf.Timestamp` gives us a typed Protobuf representation.
-
 ## Package
 
-Recommended proto path:
+Proto path:
 
 ```text
 proto/bfstore/basket/v1/basket_service.proto
 ```
 
-Recommended package:
+Package:
 
 ```proto
 syntax = "proto3";
@@ -49,24 +35,22 @@ package bfstore.basket.v1;
 option go_package = "github.com/mantrobuslawal/bfstore/proto/gen/go/bfstore/basket/v1;basketv1";
 ```
 
-Adjust the generated path if the repo's actual generated-code layout differs.
-
 ## Imports
 
-The basket contract should import:
+The basket contract imports:
 
 ```proto
 import "google/protobuf/timestamp.proto";
 import "bfstore/common/v1/money.proto";
 ```
 
-`google.protobuf.Timestamp` should be used for all time fields.
+`google.protobuf.Timestamp` will be used for all time fields.
 
-`bfstore.common.v1.Money` should be used for all API money values.
+`bfstore.common.v1.Money` will be used for all API money values.
 
 ## Service
 
-Recommended first service:
+First service iteration:
 
 ```proto
 service BasketService {
@@ -79,20 +63,7 @@ service BasketService {
 }
 ```
 
-## Why include CreateBasket?
-
-`CreateBasket` makes the basket lifecycle explicit.
-
-Without it, `AddItem` would need to hide basket creation behaviour, which raises unclear contract questions:
-
-```text
-Does AddItem fail if basket_id does not exist?
-Does AddItem create the basket automatically?
-Who generated the basket_id?
-How does the client get a basket_id before adding an item?
-```
-
-The first iteration should be explicit:
+The first iteration is be explicit:
 
 ```text
 CreateBasket
@@ -228,11 +199,6 @@ Behaviour:
 ```text
 If the product/variant pair is not already in the basket, create a new basket item.
 If the same product/variant pair already exists, increase or update quantity according to service rules.
-```
-
-Kuti recommendation for first slice:
-
-```text
 AddItem should increase quantity for an existing product/variant pair.
 UpdateItemQuantity should replace quantity explicitly.
 ```
@@ -284,7 +250,7 @@ message ClearBasketResponse {
 }
 ```
 
-Kuti recommendation for first slice:
+Notes for first slice:
 
 ```text
 ClearBasket should remove all items and keep the basket available as ACTIVE.
@@ -443,7 +409,7 @@ basket_id is required
 
 ## Error model
 
-Recommended gRPC status codes:
+gRPC status codes:
 
 ```text
 InvalidArgument
@@ -471,7 +437,7 @@ removing unknown basket_item_id -> NotFound
 
 ## Identifier rules
 
-Basket API should use:
+Basket API will use:
 
 ```text
 basket_id
@@ -480,7 +446,7 @@ product_id
 variant_id
 ```
 
-It should not use these as identity:
+It will not use these as identity:
 
 ```text
 product name
@@ -490,17 +456,17 @@ slug
 SKU
 ```
 
-SKU may appear later as snapshot or inventory-related data, but it should not replace `product_id` or `variant_id`.
+SKU may appear later as snapshot or inventory-related data, but will not replace `product_id` or `variant_id`.
 
 ## Money rules
 
-API contracts should use:
+API contracts will use:
 
 ```proto
 bfstore.common.v1.Money
 ```
 
-Database storage may still use:
+Database storage will still use:
 
 ```text
 unit_price_minor_units BIGINT
@@ -520,7 +486,7 @@ Convert at the service boundary.
 
 ## Timestamp rules
 
-API contracts should use:
+API contracts will use:
 
 ```proto
 google.protobuf.Timestamp
@@ -528,7 +494,7 @@ google.protobuf.Timestamp
 
 for all time fields.
 
-Database storage may use:
+Database storage will use:
 
 ```sql
 TIMESTAMP(6)
@@ -552,7 +518,7 @@ GetBasketBySession
 AssociateBasketWithCustomer
 ```
 
-Do not add these in the first slice unless they are needed.
+Will not add these in the first slice unless needed.
 
 ## Design notes
 
@@ -583,5 +549,3 @@ Typed timestamps make the Protobuf contract clearer and easier to map consistent
 ```text
 Keep the first BasketService contract small, explicit, and consistent with existing common types.
 ```
-
-Keep it boring where production matters.
