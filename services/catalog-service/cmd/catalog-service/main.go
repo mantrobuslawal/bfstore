@@ -85,7 +85,11 @@ func main() {
 
 	repository := catalog.NewMySQLRepository(db)
 	service := catalog.NewService(repository)
-	grpcServer := cataloggrpc.NewServer(service, logger)
+	grpcServer, err := cataloggrpc.NewServer(service, logger)
+	if err != nil {
+		logger.Error("failed to setup requestmetrics interceptor", "error", err)
+		os.Exit(1)
+	}
 
 	if cfg.EnableGRPCReflection {
 		reflection.Register(grpcServer)
