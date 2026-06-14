@@ -164,7 +164,7 @@ catalog-load: ## Load test catalog service
 	REQUESTS=100 SLEEP_SECONDS=0.05 ./scripts/local/catalog-load.sh 
 
 MYSQL_ROOT_PASSWORD ?= bfstore_root_password
-MYSQL_VOLUME ?= $(COMPOSE_PROJECT_NAME)_bfstore-mysql-data
+MYSQL_VOLUME ?= $(PROJECT_NAME)_bfstore_mysql_data
 
 BASKET_MIGRATIONS_PATH ?= db/basket/migrations
 BASKET_DATABASE_URL ?= mysql://bfstore_basket:bfstore_basket_password@tcp(localhost:3306)/bfstore_basket?multiStatements=true&parseTime=true

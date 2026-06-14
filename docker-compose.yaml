@@ -7,7 +7,7 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - bfstore-mysql-data:/var/lib/mysql
+      - bfstore_mysql_data:/var/lib/mysql
       - ./deploy/local/mysql/init:/docker-entrypoint-initdb.d:ro
     networks:
       - bfstore
@@ -99,7 +99,7 @@ services:
        MYSQL_HOST: mysql
        MYSQL_PORT: 3306
        MYSQL_DATABASE: ${CATALOG_DB_NAME:-bfstore_catalog}
-       MYSQL_USER: ${CATALOG_DB_USER:-bfstore_catalog_user}
+       MYSQL_USER: ${CATALOG_DB_USER:-bfstore_catalog}
        MYSQL_PASSWORD: ${CATALOG_DB_PASSWORD:-bfstore_catalog_password}
        KAFKA_BOOTSTRAP_SERVERS: kafka:9092
        CATALOG_SERVICE_GRPC_PORT: ${CATALOG_SERVICE_GRPC_PORT:-50051}
@@ -140,7 +140,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yaml"
     volumes:
       - ./deploy/local/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
-      - bfstore-prometheus-data:/prometheus
+      - bfstore_prometheus_data:/prometheus
     ports:
       - "9090:9090"
     networks:
@@ -156,7 +156,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
-      - bfstore-grafana-data:/var/lib/grafana
+      - bfstore_grafana_data:/var/lib/grafana
       - ./deploy/local/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/local/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
@@ -174,5 +174,5 @@ networks:
 volumes:
   bfstore_mysql_data:
   bfstore_kafka_data:
-  bfstore-prometheus-data:
-  bfstore-grafana-data:
+  bfstore_prometheus_data:
+  bfstore_grafana_data:
