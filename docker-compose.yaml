@@ -1,22 +1,22 @@
 services:
+  services:
   mysql:
     image: mysql:8.4
     container_name: bfstore-mysql
-    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-bfstore_root_password}
+      MYSQL_ROOT_PASSWORD: bfstore_root_password
     ports:
       - "3306:3306"
     volumes:
-      - bfstore_mysql_data:/var/lib/mysql
-      - ./db/mysql-init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      - bfstore-mysql-data:/var/lib/mysql
+      - ./deploy/local/mysql/init:/docker-entrypoint-initdb.d:ro
     networks:
-      - bfstore
+      - bfstore-local
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pbfstore_root_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   kafka:
     image: apache/kafka:4.1.2
