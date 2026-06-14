@@ -49,7 +49,7 @@ inventory movement/reservation where needed
 
 ## Proposed migration paths
 
-Recommended folder:
+Folder:
 
 ```text
 db/basket/migrations/
@@ -71,7 +71,7 @@ Later:
 
 ## Tables
 
-Recommended first tables:
+First tables:
 
 ```text
 baskets
@@ -86,7 +86,7 @@ Purpose:
 stores basket identity and lifecycle state
 ```
 
-Suggested SQL:
+SQL:
 
 ```sql
 CREATE TABLE baskets (
@@ -123,7 +123,7 @@ Purpose:
 stores mutable basket item state
 ```
 
-Suggested SQL:
+SQL:
 
 ```sql
 CREATE TABLE basket_items (
@@ -244,5 +244,3 @@ Basket data is mutable.
 Order data is committed.
 Do not design basket tables as if they are order tables.
 ```
-
-Keep it boring where production matters.

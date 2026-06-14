@@ -1,4 +1,4 @@
-# ADR 0012: Product, Variant, Category, and Basket Identifier Strategy
+# ADR 0013: Product, Variant, Category, and Basket Identifier Strategy
 
 ## Status
 
@@ -237,5 +237,3 @@ Product and variant IDs should be boring and stable.
 Category IDs may be mnemonic, but still stable.
 Slugs are for humans and URLs, not system identity.
 ```
-
-Keep it boring where production matters.

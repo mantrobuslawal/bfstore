@@ -149,4 +149,3 @@ Basket is not a mini order service.
 Basket is mutable customer intent before checkout.
 ```
 
-Keep it boring where production matters.

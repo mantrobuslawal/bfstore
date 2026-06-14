@@ -176,4 +176,3 @@ Catalog owns product truth.
 Order will later convert basket intent into a committed commercial record.
 ```
 
-Keep it boring where production matters.
