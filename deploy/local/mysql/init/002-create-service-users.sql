@@ -1,6 +1,11 @@
 -- bfstore local MySQL bootstrap
 -- Creates local service users and grants each service user access only to its own database.
 -- Host '%' is used for local Docker development because connections may come from the Docker bridge gateway.
+CREATE USER IF NOT EXISTS 'bfstore_basket'@'%'
+  IDENTIFIED BY 'bfstore_basket_password';
+
+ALTER USER 'bfstore_basket'@'%'
+  IDENTIFIED BY 'bfstore_basket_password';
 
 CREATE USER IF NOT EXISTS 'bfstore_catalog'@'%'
   IDENTIFIED BY 'bfstore_catalog_password';
