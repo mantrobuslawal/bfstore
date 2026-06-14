@@ -163,7 +163,28 @@ observability-logs:
 catalog-load: ## Load test catalog service
 	REQUESTS=100 SLEEP_SECONDS=0.05 ./scripts/local/catalog-load.sh 
 
+BASKET_MIGRATIONS_PATH ?= db/basket/migrations
+BASKET_DATABASE_URL ?= mysql://bfstore_basket:bfstore_basket_password@tcp(localhost:3306)/bfstore_basket?multiStatements=true&parseTime=true
 
+.PHONY: basket-db-migrate-up
+basket-db-migrate-up:
+	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" up
+
+.PHONY: basket-db-migrate-down
+basket-db-migrate-down:
+	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" down 1
+
+.PHONY: basket-db-migrate-version
+basket-db-migrate-version:
+	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" version
+
+.PHONY: basket-db-migrate-force
+basket-db-migrate-force:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "VERSION is required. Example: make basket-db-migrate-force VERSION=1"; \
+		exit 1; \
+	fi
+	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" force $(VERSION)
 
 
 
