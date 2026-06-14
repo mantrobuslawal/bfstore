@@ -1,243 +1,397 @@
-# `basket/v1`
+# Basket API v1
 
-## 1. Purpose
-
-This document describes the `basket/v1` Protobuf package for bfstore.
-
-The package defines shopping basket contracts for current shopping intent before checkout.
-
-These contracts are client-visible engineering artefacts and should be treated as stable integration boundaries.
-
----
-
-## 2. Package Name
-
-```proto
-package acme.basket.v1;
-```
-
-Recommended Go package option:
-
-```proto
-option go_package = "github.com/acme-ltd/bfstore/gen/go/acme/basket/v1;basketv1";
-```
-
----
-
-## 3. Ownership
-
-| Area | Owner |
-|---|---|
-| Package owner | `basket-service` |
-| Contract review | API governance / service owner |
-| Backward compatibility | Service owner |
-| Generated clients | Build/tooling pipeline |
-
-Ownership rule:
-
-> The service that owns the business capability owns the contract. Other services integrate through APIs and events, not database tables.
-
----
-
-## 4. Expected Files
+This directory contains the version 1 Protobuf contract for the bfstore basket service.
 
 ```text
-proto/acme/basket/v1/
-├── README.md
-├── basket_service.proto
-├── basket.proto
-├── basket_events.proto
+proto/bfstore/basket/v1/
+  basket_service.proto
+  README.md
 ```
 
-Event contracts may later move to a dedicated package such as:
+## Purpose
+
+The basket service manages a customer's mutable basket before checkout.
+
+It owns temporary customer intent:
 
 ```text
-proto/acme/<domain>/events/v1/
+create basket
+get basket
+add item
+update item quantity
+remove item
+clear basket
 ```
 
-if that separation improves clarity.
+It does not own product, variant, category, inventory, payment, shipping, or order truth.
 
----
+## Package
 
-## 5. Primary Service Contract
+```proto
+package bfstore.basket.v1;
+
+option go_package = "github.com/mantrobuslawal/bfstore/proto/gen/go/bfstore/basket/v1;basketv1";
+```
+
+## File
+
+```text
+basket_service.proto
+```
+
+## Imports
+
+The basket contract uses shared bfstore and Google Protobuf types:
+
+```proto
+import "bfstore/common/v1/money.proto";
+import "google/protobuf/timestamp.proto";
+```
+
+Use:
+
+```text
+bfstore.common.v1.Money
+```
+
+for all API money values.
+
+Use:
+
+```text
+google.protobuf.Timestamp
+```
+
+for all API time values.
+
+## Service
 
 ```proto
 service BasketService {
-  rpc CreateBasket(... ) returns (...);
-  rpc GetBasket(... ) returns (...);
-  rpc AddBasketItem(... ) returns (...);
-  rpc UpdateBasketItem(... ) returns (...);
-  rpc RemoveBasketItem(... ) returns (...);
-  rpc MarkBasketCheckedOut(... ) returns (...);
+  rpc CreateBasket(CreateBasketRequest) returns (CreateBasketResponse);
+  rpc GetBasket(GetBasketRequest) returns (GetBasketResponse);
+  rpc AddItem(AddItemRequest) returns (AddItemResponse);
+  rpc UpdateItemQuantity(UpdateItemQuantityRequest)
+      returns (UpdateItemQuantityResponse);
+  rpc RemoveItem(RemoveItemRequest) returns (RemoveItemResponse);
+  rpc ClearBasket(ClearBasketRequest) returns (ClearBasketResponse);
 }
 ```
 
----
+## First-slice API behaviour
 
-## 6. Core Message Types
+### CreateBasket
 
-Recommended message types:
+Creates an empty active basket and returns the generated `basket_id`.
 
-- `Basket`
-- `BasketItem`
-- `BasketStatus`
+The request accepts an optional `currency_code`.
 
-These messages should describe business concepts and API contracts, not database rows.
+For local development, the service may default omitted currency to:
 
----
+```text
+GBP
+```
 
-## Recommended Status Enum
+The defaulting behaviour should be explicit in service code and tests.
+
+### GetBasket
+
+Returns the current state of an existing basket.
+
+### AddItem
+
+Adds a catalog product variant to an existing basket.
+
+Required identifiers:
+
+```text
+basket_id
+product_id
+variant_id
+```
+
+If the same product/variant pair already exists in the basket, the first implementation should increase the existing quantity.
+
+### UpdateItemQuantity
+
+Replaces the quantity of an existing basket item.
+
+This operation should not be used as implicit removal.
+
+Quantity `0` should be rejected; clients should call `RemoveItem`.
+
+### RemoveItem
+
+Removes one existing basket item.
+
+### ClearBasket
+
+Removes all basket items.
+
+For the first slice, `ClearBasket` should leave the basket available as an active empty basket.
+
+A later lifecycle pass may introduce stricter cleared/expired/checked-out semantics.
+
+## Core types
+
+### Basket
+
+```proto
+message Basket {
+  string basket_id = 1;
+  repeated BasketItem items = 2;
+  bfstore.common.v1.Money subtotal = 3;
+  BasketStatus status = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+```
+
+### BasketItem
+
+```proto
+message BasketItem {
+  string basket_item_id = 1;
+  string product_id = 2;
+  string variant_id = 3;
+  string product_name_snapshot = 4;
+  string variant_name_snapshot = 5;
+  int32 quantity = 6;
+  bfstore.common.v1.Money unit_price = 7;
+  bfstore.common.v1.Money line_total = 8;
+  google.protobuf.Timestamp added_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+```
+
+### BasketStatus
 
 ```proto
 enum BasketStatus {
   BASKET_STATUS_UNSPECIFIED = 0;
   BASKET_STATUS_ACTIVE = 1;
-  BASKET_STATUS_CHECKED_OUT = 2;
+  BASKET_STATUS_CLEARED = 2;
   BASKET_STATUS_EXPIRED = 3;
-  BASKET_STATUS_ABANDONED = 4;
+  BASKET_STATUS_CHECKED_OUT = 4;
 }
 ```
 
----
+The service should not return `BASKET_STATUS_UNSPECIFIED` for a valid persisted basket.
 
-## 7. Contract Rules
+## Identifier rules
 
-- Basket Service owns baskets and basket items.
-- Basket Service does not reserve stock.
-- Only active baskets may be changed.
-- Quantities must be greater than zero.
-- Basket prices are not final order prices unless explicitly snapshotted.
-
----
-
-## 8. Event Contracts
-
-Expected or potential events:
-
-- `BasketCreated`
-- `BasketItemAdded`
-- `BasketItemUpdated`
-- `BasketItemRemoved`
-- `BasketCheckedOut`
-- `BasketExpired`
-
-Event rules:
+The basket API uses stable identifiers:
 
 ```text
-events describe facts that have already happened
-events must include the standard event envelope
-events must be versioned
-events must carry correlation context
-consumers must be idempotent
+basket_id
+basket_item_id
+product_id
+variant_id
 ```
 
----
-
-## 9. Error Behaviour
-
-Expected error behaviour:
-
-- NOT_FOUND for missing basket
-- FAILED_PRECONDITION for checked-out basket or inactive product
-- INVALID_ARGUMENT for invalid quantity
-- UNAVAILABLE for database outage
-
-All gRPC errors should follow:
+Ownership:
 
 ```text
-docs/api/error-model.md
+basket_id       -> basket-service
+basket_item_id  -> basket-service
+product_id      -> catalog-service
+variant_id      -> catalog-service
 ```
 
----
-
-## 10. Versioning
-
-This package is versioned as `v1`.
-
-Compatible changes include:
+The API should not use these as system identity:
 
 ```text
-adding optional fields
-adding new messages
-adding new RPCs
-adding new event types
-adding comments
+product name
+variant name
+category name
+slug
+SKU
 ```
 
-Breaking changes include:
+SKU may appear later as inventory or snapshot data, but it should not replace `product_id` or `variant_id`.
 
-```text
-renaming services or RPCs
-renaming packages
-removing fields
-renumbering fields
-changing field types
-changing field meaning
-changing idempotency behaviour
-changing error semantics
-```
+## Money rules
 
-Breaking changes require a new package version, such as:
+The API contract uses:
 
 ```proto
-package acme.basket.v2;
+bfstore.common.v1.Money
 ```
 
-Removed fields must be reserved.
-
----
-
-## 11. Security and Privacy
-
-Contracts must avoid unnecessary sensitive data.
-
-Do not expose:
+Database storage may still use simple columns such as:
 
 ```text
-passwords
-tokens
-raw payment card data
-secret values
-internal stack traces
-internal database IDs
-unnecessary customer PII
+unit_price_minor_units BIGINT
+line_total_minor_units BIGINT
+currency_code CHAR(3)
 ```
 
-Prefer opaque IDs and service-owned lookups where sensitive details are required.
+The service layer maps database values to Protobuf `Money`.
 
----
-
-## 12. Testing Expectations
-
-This package should be covered by:
+Practical rule:
 
 ```text
-buf lint
-buf breaking
-protobuf generation checks
-gRPC contract tests
-event contract tests where events are defined
-integration tests for critical service behaviours
+Use Money in Protobuf contracts.
+Use minor-unit BIGINT plus currency_code in MySQL.
+Convert at the service boundary.
 ```
 
----
+## Timestamp rules
 
-## 13. Related Documents
+The API contract uses:
+
+```proto
+google.protobuf.Timestamp
+```
+
+Database storage may use:
+
+```sql
+TIMESTAMP(6)
+```
+
+The service layer maps database timestamp values to Protobuf timestamps.
+
+## Status mapping
+
+The Protobuf API uses `BasketStatus`.
+
+The first database schema may store status as:
+
+```sql
+status VARCHAR(32)
+```
+
+Recommended mapping:
+
+| Database value | Protobuf value |
+| --- | --- |
+| `ACTIVE` | `BASKET_STATUS_ACTIVE` |
+| `CLEARED` | `BASKET_STATUS_CLEARED` |
+| `EXPIRED` | `BASKET_STATUS_EXPIRED` |
+| `CHECKED_OUT` | `BASKET_STATUS_CHECKED_OUT` |
+
+## Validation rules
+
+### CreateBasketRequest
 
 ```text
-docs/api/protobuf-style-guide.md
-docs/api/error-model.md
-docs/api/versioning.md
-docs/architecture/communication-patterns.md
-docs/architecture/service-boundaries.md
-docs/events/event-catalog.md
-docs/testing/testing-strategy.md
+currency_code may be omitted if the service has a documented default
+currency_code must be a valid ISO-style 3-letter currency code when provided
 ```
 
----
+### GetBasketRequest
 
-## 14. Summary
+```text
+basket_id is required
+```
 
-The `acme.basket.v1` package is part of bfstore's contract-first service design.
+### AddItemRequest
 
-It should remain business-focused, versioned, testable, and aligned with the owning service boundary.
+```text
+basket_id is required
+product_id is required
+variant_id is required
+quantity must be between 1 and 99
+```
+
+### UpdateItemQuantityRequest
+
+```text
+basket_id is required
+basket_item_id is required
+quantity must be between 1 and 99
+```
+
+### RemoveItemRequest
+
+```text
+basket_id is required
+basket_item_id is required
+```
+
+### ClearBasketRequest
+
+```text
+basket_id is required
+```
+
+## Error model
+
+Recommended gRPC status codes:
+
+| Condition | gRPC code |
+| --- | --- |
+| Missing or invalid required field | `InvalidArgument` |
+| Basket not found | `NotFound` |
+| Basket item not found | `NotFound` |
+| Basket cannot be modified in current state | `FailedPrecondition` |
+| Unexpected persistence/runtime failure | `Internal` |
+
+Examples:
+
+```text
+missing basket_id -> InvalidArgument
+unknown basket_id -> NotFound
+quantity less than 1 -> InvalidArgument
+quantity greater than 99 -> InvalidArgument
+unknown basket_item_id -> NotFound
+```
+
+## Boundary rules
+
+The basket service must not query catalog database tables directly.
+
+It should reference catalog-owned entities by ID and, where necessary, use catalog APIs or future read models.
+
+Basket state is mutable customer intent.
+
+Order state is committed commercial history.
+
+```text
+basket item = customer intent
+order line = commercial record
+```
+
+## Generating code
+
+From the repo root:
+
+```bash
+make proto-lint
+make proto-generate
+```
+
+Or generate only catalog contracts when needed:
+
+```bash
+make proto-generate-catalog
+```
+
+A basket-specific generation target may be added later:
+
+```bash
+buf generate --path proto/bfstore/basket/v1
+```
+
+## Future extensions
+
+Future versions may add:
+
+```text
+MergeBasket
+ExpireBasket
+ApplyPromotion
+RemovePromotion
+ValidateBasketForCheckout
+GetBasketBySession
+AssociateBasketWithCustomer
+```
+
+These are intentionally excluded from the first slice.
+
+## Practical rule
+
+Keep the first basket contract small, explicit, typed, and consistent with shared bfstore contract types.
+
+Keep it boring where production matters.
