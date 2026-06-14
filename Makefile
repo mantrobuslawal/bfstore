@@ -187,12 +187,15 @@ local-db-up: ## Start local MySQL only
 	$(DOCKER_COMPOSE) up -d mysql
 
 .PHONY: local-db-wait
-local-db-wait: ## Wait for local MySQL to become ready
-	@echo "Waiting for MySQL..."
-	@until $(DOCKER_COMPOSE) exec -T mysql mysqladmin ping -h localhost --silent; do \
+local-db-wait: ## Wait for local MySQL to accept authenticated root queries
+	@echo "Waiting for MySQL to accept root connections..."
+	@until $(DOCKER_COMPOSE) exec -T mysql mysql \
+		-uroot \
+		-p$(MYSQL_ROOT_PASSWORD) \
+		-e "SELECT 1;" >/dev/null 2>&1; do \
 		sleep 2; \
 	done
-	@echo "MySQL is ready."
+	@echo "MySQL is ready for authenticated queries."
 
 .PHONY: local-db-check-root
 local-db-check-root: ## Check root login works with configured local MySQL password
