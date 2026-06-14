@@ -164,6 +164,14 @@ catalog-load: ## Load test catalog service
 	REQUESTS=100 SLEEP_SECONDS=0.05 ./scripts/local/catalog-load.sh 
 
 MYSQL_ROOT_PASSWORD ?= bfstore_root_password
+MYSQL_INIT_PATH ?= deploy/local/mysql/init
+
+.PHONY: local-db-bootstrap
+local-db-bootstrap:
+	docker compose exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/001-create-service-databases.sql
+	docker compose exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/002-create-service-users.sql
+
+MYSQL_ROOT_PASSWORD ?= bfstore_root_password
 MYSQL_VOLUME ?= $(PROJECT_NAME)_bfstore_mysql_data
 
 BASKET_MIGRATIONS_PATH ?= db/basket/migrations
@@ -202,7 +210,6 @@ basket-db-migrate-force:
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" force $(VERSION)
 
 .PHONY: local-db-fresh
-local-db-fresh: local-db-reset local-db-up local-db-wait basket-db-migrate-up basket-db-migrate-version
-
-
+local-db-fresh: 
+	local-db-reset local-db-up local-db-wait local-db-bootstrap basket-db-migrate-up basket-db-migrate-version
 
