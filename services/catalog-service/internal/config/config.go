@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // Config contains runtime configuration for Catalogue Service.
@@ -13,6 +14,7 @@ type Config struct {
 	GRPCPort             string
 	EnableGRPCReflection bool
 	Database             DatabaseConfig
+	Telemetry            TelemetryConfig
 }
 
 // DatabaseConfig contains MySQL connection configuration.
@@ -22,6 +24,18 @@ type DatabaseConfig struct {
 	Name     string
 	User     string
 	Password string
+}
+
+// TelemetryConfig contains OTLP configuration for service
+type TelemetryConfig struct {
+	Environment           string
+	ServiceVersion        string
+	OTLPEndpoint          string
+	OTLPInsecure          bool
+	TelemetryEnabled      bool
+	TracesEnabled         bool
+	MetricsEnabled        bool
+	MetricsExportInterval time.Duration
 }
 
 // Load reads configuration from environment variables.
@@ -38,6 +52,16 @@ func Load() (Config, error) {
 			Password: getEnv("MYSQL_PASSWORD", "bfstore_catalog_password"),
 		},
 		EnableGRPCReflection: loadBoolEnv("GRPC_REFLECTION_ENABLED", false),
+		Telemetry: TelemetryConfig{
+			Environment:           getEnv("ENVIRONMENT", "local"),
+			ServiceVersion:        getEnv("SERVICE_VERSION", ""),
+			OTLPEndpoint:          getEnv("OTEL_EXPORTER_OLTP_ENDPOINT", ""), // telemetry package config will set if absent
+			OTLPInsecure:          loadBoolEnv("OTEL_EXPORTER_OTLP_INSECURE", true),
+			TelemetryEnabled:      loadBoolEnv("TELEMETRY_ENABLED", false),
+			TracesEnabled:         loadBoolEnv("TRACES_ENABLED", true),
+			MetricsEnabled:        loadBoolEnv("METRICS_ENABLED", true),
+			MetricsExportInterval: loadTimeEnv("METRICS_EXPORT_INTERVAL"),
+		},
 	}
 
 	if cfg.Database.Password == "" {
@@ -82,4 +106,22 @@ func loadBoolEnv(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func loadTimeEnv(key string) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		fallback, _ := time.ParseDuration("0s")
+		return fallback
+	}
+
+	// expecting a string number e.g. "10" or "5"
+	newValue := []string{value, "s"}
+	value = strings.Join(newValue, "")
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		fallback, _ := time.ParseDuration("0s")
+		return fallback
+	}
+	return duration
 }

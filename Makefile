@@ -125,3 +125,45 @@ catalog-list-products-with-correlation: ## Test correlation id propagation
 	   -d '{"page": {"page_size":5}}' \
 	   localhost:50051 \
 	   bfstore.catalog.v1.CatalogService/ListProducts
+
+.PHONY: otel-up
+otel-up:   ## Start docker compose otel-collector
+	docker compose -f ${COMPOSE_FILE} up -d otel-collector
+
+.PHONY: otel-logs
+otel-logs:	## Follow docker compose otel-collector logs
+	docker compose -f $(COMPOSE_FILE) logs -f otel-collector
+
+.PHONY: catalog-run-telemetry
+catalog-run-telemetry:
+	cd services/catalog-service && \
+	   TELEMETRY_ENABLED=true \
+	   OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317 \
+	   OTEL_EXPORTER_OTLP_INSECURE=true \
+	   GRPC_REFLECTION_ENABLED=true \
+	   go run ./cmd/catalog-service
+
+.PHONY: metrics-up
+metrics-up:
+	docker compose -f $(COMPOSE_FILE) up -d otel-collector prometheus
+
+.PHONY: metrics-logs
+metrics-logs:
+	docker compose -f $(COMPOSE_FILE) logs -f otel-collector prometheus
+
+.PHONY: observability-up
+observability-up:
+	docker compose -f $(COMPOSE_FILE) up -d otel-collector jaeger prometheus grafana
+
+.PHONY: observability-logs
+observability-logs:
+	docker compose -f $(COMPOSE_FILE) logs -f otel-collector jaeger prometheus grafana
+
+.PHONY: catalog-load
+catalog-load: ## Load test catalog service
+	REQUESTS=100 SLEEP_SECONDS=0.05 ./scripts/local/catalog-load.sh 
+
+
+
+
+

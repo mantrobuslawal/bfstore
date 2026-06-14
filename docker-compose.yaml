@@ -109,6 +109,64 @@ services:
      networks:
        - bfstore
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deploy/local/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "9464:9464"
+    networks:
+      - bfstore
+    restart: unless-stopped
+    depends_on:
+      - jaeger
+    
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: bfstore-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+    networks:
+      - bfstore
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bfstore-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yaml"
+    volumes:
+      - ./deploy/local/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - bfstore-prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - bfstore
+    depends_on:
+      - otel-collector
+    
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bfstore-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - bfstore-grafana-data:/var/lib/grafana
+      - ./deploy/local/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/local/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - bfstore
+
 networks:
   bfstore:
     name: bfstore
@@ -117,3 +175,5 @@ networks:
 volumes:
   bfstore_mysql_data:
   bfstore_kafka_data:
+  bfstore-prometheus-data:
+  bfstore-grafana-data:

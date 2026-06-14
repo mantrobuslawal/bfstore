@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mantrobuslawal/bfstore/pkg/platform/dbmetrics"
 	"github.com/mantrobuslawal/bfstore/pkg/platform/healthcheck"
+	"github.com/mantrobuslawal/bfstore/pkg/platform/telemetry"
 	"github.com/mantrobuslawal/bfstore/services/catalog-service/internal/catalog"
 	"github.com/mantrobuslawal/bfstore/services/catalog-service/internal/config"
 	"github.com/mantrobuslawal/bfstore/services/catalog-service/internal/database"
@@ -43,9 +45,51 @@ func main() {
 
 	logger.Info("database connection opened")
 
+	if err := dbmetrics.Register(db, dbmetrics.Config{
+		MeterName: "github.com/mantrobuslawal/bfstore/services/catalog-service",
+		DBSystem:  "mysql",
+		DBName:    cfg.Database.Name,
+	}); err != nil {
+		logger.Error("failed to register database metrics", "error", err)
+		os.Exit(1)
+	}
+
+	var telemetryRuntime *telemetry.Runtime
+
+	if cfg.Telemetry.TelemetryEnabled {
+		telemetryConfig := telemetry.DefaultConfig("catalog-service")
+		telemetryConfig.Environment = cfg.Environment
+		telemetryConfig.ServiceVersion = cfg.Telemetry.ServiceVersion
+		telemetryConfig.OTLPEndpoint = cfg.Telemetry.OTLPEndpoint
+		telemetryConfig.OTLPInsecure = cfg.Telemetry.OTLPInsecure
+		telemetryConfig.TracesEnabled = cfg.Telemetry.TracesEnabled
+		telemetryConfig.MetricsEnabled = cfg.Telemetry.MetricsEnabled
+		telemetryConfig.MetricExportInterval = cfg.Telemetry.MetricsExportInterval
+
+		telemetryRuntime, err = telemetry.Setup(ctx, telemetryConfig)
+		if err != nil {
+			logger.Error("failed to setup telemetry", "error", err)
+			os.Exit(1)
+		}
+
+		logger.Info(
+			"telemetry enabled",
+			"service", telemetryConfig.ServiceName,
+			"environment", telemetryConfig.Environment,
+			"oltp_enpoint", telemetryConfig.OTLPEndpoint,
+			"traces_enabled", telemetryConfig.TracesEnabled,
+			"metrics_enabled", telemetryConfig.TracesEnabled,
+		)
+
+	}
+
 	repository := catalog.NewMySQLRepository(db)
 	service := catalog.NewService(repository)
-	grpcServer := cataloggrpc.NewServer(service, logger)
+	grpcServer, err := cataloggrpc.NewServer(service, logger)
+	if err != nil {
+		logger.Error("failed to setup requestmetrics interceptor", "error", err)
+		os.Exit(1)
+	}
 
 	if cfg.EnableGRPCReflection {
 		reflection.Register(grpcServer)
@@ -99,6 +143,15 @@ func main() {
 	logger.Info("marking service not serving")
 	healthManager.MarkNotServing()
 	healthManager.Shutdown()
+
+	if telemetryRuntime != nil {
+		telemetryShutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err = telemetryRuntime.Shutdown(telemetryShutdownCtx); err != nil {
+			logger.Error("failed to shutdown telemetry", "error", err)
+		}
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

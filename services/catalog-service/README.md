@@ -1,209 +1,183 @@
 # Catalog Service
 
-The `catalog-service` owns product catalog data for bfstore.
+The `catalog-service` owns the product catalog for bfstore.
 
-It provides gRPC APIs for reading catalog information such as products, categories, product variants, product images, and product attribute definitions.
+It provides gRPC APIs for reading catalog information such as products, categories, variants, images, and product attributes.
 
-The service is implemented in Go and uses:
+This service is part of the bfstore platform: a cloud-native ecommerce system for developer-themed homeware.
 
-- gRPC for service APIs;
-- Protobuf-generated contracts from the root `proto` directory;
-- MySQL for catalog persistence;
-- `database/sql` for database access;
-- `otelsql` for database instrumentation;
-- shared platform gRPC interceptors;
-- standard gRPC health checks;
-- structured logging with `log/slog`;
-- OpenTelemetry tracing and metrics bootstrap;
-- Jaeger trace visualisation through the local OpenTelemetry Collector;
-- graceful shutdown for local and container runtime behaviour.
+## Status
+
+Current iteration status:
+
+```text
+local production-shaped slice complete
+```
+
+The service currently demonstrates:
+
+```text
+gRPC API serving
+MySQL persistence
+service-owned database boundary
+unit tests
+repository tests
+local smoke testing
+standard gRPC health checks
+gRPC reflection for local development
+structured request logging
+correlation ID propagation
+panic recovery
+graceful shutdown
+OpenTelemetry bootstrap
+gRPC request tracing
+database/sql tracing
+database pool metrics
+request metrics
+OpenTelemetry Collector integration
+Jaeger trace visualisation
+Prometheus metric querying
+Grafana dashboard provisioning
+local traffic generation
+```
+
+## Service ownership
+
+The catalog service owns product catalog read models and catalog persistence.
+
+It is responsible for:
+
+```text
+products
+categories
+product variants
+product images
+catalog attributes
+catalog metadata required for browsing
+```
+
+It is not responsible for:
+
+```text
+basket state
+inventory reservation
+order placement
+payment processing
+shipping
+notifications
+reviews
+recommendations
+search indexing
+```
+
+Those responsibilities belong to separate services or later bfstore slices.
 
 ## Runtime architecture
 
-At runtime, the catalog service starts like this:
+At runtime, the service follows this shape:
 
 ```text
-load configuration
--> create logger
--> initialise telemetry when enabled
--> open instrumented MySQL connection pool
--> run catalog readiness check
--> create catalog repository
--> create catalog service
--> create gRPC server
--> register platform interceptors
--> register OpenTelemetry gRPC instrumentation
--> register catalog gRPC handler
--> register gRPC health service
--> optionally register gRPC reflection
--> start serving requests
+configuration
+  -> logger
+  -> telemetry
+  -> database connection pool
+  -> readiness checks
+  -> repository
+  -> service layer
+  -> gRPC handlers
+  -> gRPC server
+  -> health manager
+  -> graceful shutdown
 ```
 
-During shutdown:
-
-```text
-receive SIGINT or SIGTERM
--> mark service NOT_SERVING
--> stop accepting new gRPC traffic
--> allow in-flight requests to finish
--> force stop if graceful shutdown times out
--> close database connection pool
--> flush and shutdown telemetry providers
-```
-
-## Request path
-
-A typical catalog request flows through the service like this:
+Request path:
 
 ```text
 grpc client
-  -> catalog gRPC server
-  -> otelgrpc server instrumentation
+  -> gRPC server
   -> recovery interceptor
   -> correlation ID interceptor
+  -> request metrics interceptor
   -> logging interceptor
   -> catalog gRPC handler
-  -> catalog application service
+  -> catalog service
   -> catalog repository
-  -> instrumented database/sql driver
   -> MySQL
 ```
 
-When telemetry is enabled, Jaeger should show a trace shaped roughly like:
+Telemetry path:
 
 ```text
-/bfstore.catalog.v1.CatalogService/ListProducts
-  -> database/sql span
-  -> database/sql span
+catalog-service
+  -> OpenTelemetry Collector
+  -> Jaeger for traces
+  -> Prometheus for metrics
+  -> Grafana for dashboards
 ```
 
-The exact database span names may vary depending on the SQL operation and the instrumentation library behaviour.
+## Local ports
 
-## Database instrumentation
-
-The catalog service instruments MySQL at the database connection boundary:
+Typical local ports:
 
 ```text
-services/catalog-service/internal/database/mysql.go
+catalog-service gRPC: 50051
+MySQL: 3306
+OpenTelemetry Collector OTLP gRPC: 4317
+OpenTelemetry Collector OTLP HTTP: 4318
+OpenTelemetry Collector Prometheus exporter: 9464
+Jaeger UI: 16686
+Prometheus UI: 9090
+Grafana UI: 3000
 ```
 
-This is deliberate.
+## Configuration
 
-Instrumentation belongs at the connection boundary first, not scattered through every repository method.
-
-The service uses:
+Common local environment variables:
 
 ```text
-github.com/XSAM/otelsql
-```
-
-to wrap Go's standard `database/sql` MySQL driver.
-
-The resulting flow is:
-
-```text
-catalog repository
-  -> *sql.DB
-  -> otelsql instrumented driver wrapper
-  -> go-sql-driver/mysql
-  -> MySQL
-```
-
-## Driver registration
-
-The instrumented SQL driver should be registered once per process.
-
-The recommended pattern is:
-
-```go
-var (
-    registerInstrumentedDriverOnce sync.Once
-    registerInstrumentedDriverName string
-    registerInstrumentedDriverErr  error
-)
-```
-
-Then:
-
-```go
-func instrumentedMySQLDriver() (string, error) {
-    registerInstrumentedDriverOnce.Do(func() {
-        registerInstrumentedDriverName, registerInstrumentedDriverErr = otelsql.Register(baseMySQLDriverName)
-    })
-
-    if registerInstrumentedDriverErr != nil {
-        return "", registerInstrumentedDriverErr
-    }
-
-    return registerInstrumentedDriverName, nil
-}
-```
-
-This avoids duplicate SQL driver registration if `Open` is called more than once in a process.
-
-## Context propagation requirement
-
-Database spans attach correctly to request traces when repository methods use context-aware database calls:
-
-```go
-db.QueryContext(ctx, query, args...)
-db.QueryRowContext(ctx, query, args...)
-db.ExecContext(ctx, query, args...)
-```
-
-Avoid non-context calls in request paths:
-
-```go
-db.Query(query, args...)
-db.QueryRow(query, args...)
-db.Exec(query, args...)
-```
-
-The `ctx` from the gRPC request should flow through:
-
-```text
-gRPC handler
-  -> catalog service method
-  -> repository method
-  -> QueryContext / QueryRowContext / ExecContext
-```
-
-That is what makes the DB spans appear underneath the gRPC request span in Jaeger.
-
-## Telemetry
-
-Telemetry can be enabled locally with:
-
-```bash
 TELEMETRY_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 OTEL_EXPORTER_OTLP_INSECURE=true
+GRPC_REFLECTION_ENABLED=true
 ```
 
-When running the service from the host with `go run`, use:
+Database configuration is provided through the service config package and local environment setup.
 
-```text
-localhost:4317
-```
-
-When running the service from inside Docker Compose, use:
+When running inside Docker Compose, the OTLP endpoint should normally use the Compose service name:
 
 ```text
 otel-collector:4317
 ```
 
-Useful local telemetry flow:
+When running from the host with `go run`, use:
 
 ```text
-catalog-service
-  -> OTLP gRPC localhost:4317
-  -> otel-collector
-  -> jaeger
+localhost:4317
 ```
 
-## Smoke testing database spans
+## Running local dependencies
 
-Run the catalog service with telemetry enabled:
+Start MySQL and observability services:
+
+```bash
+make observability-up
+```
+
+Or directly:
+
+```bash
+docker compose up -d mysql otel-collector jaeger prometheus grafana
+```
+
+Check status:
+
+```bash
+docker compose ps
+```
+
+## Running the service locally
+
+From the service directory:
 
 ```bash
 cd services/catalog-service
@@ -215,20 +189,117 @@ GRPC_REFLECTION_ENABLED=true \
 go run ./cmd/catalog-service
 ```
 
-Send a request with an explicit correlation ID:
+## gRPC API
+
+Reflection can be enabled locally with:
+
+```text
+GRPC_REFLECTION_ENABLED=true
+```
+
+List services:
+
+```bash
+grpcurl -plaintext localhost:50051 list
+```
+
+Expected service:
+
+```text
+bfstore.catalog.v1.CatalogService
+```
+
+Call `ListProducts`:
 
 ```bash
 grpcurl -plaintext \
-  -H 'x-correlation-id: local-dev-db-otel-123' \
+  -H 'x-correlation-id: local-dev-readme-001' \
   -d '{"page":{"page_size":5}}' \
   localhost:50051 \
   bfstore.catalog.v1.CatalogService/ListProducts
 ```
 
-Open Jaeger:
+## Health checks
+
+Check whole-server health:
+
+```bash
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+```
+
+Expected response:
+
+```json
+{
+  "status": "SERVING"
+}
+```
+
+Check catalog service health:
+
+```bash
+grpcurl -plaintext \
+  -d '{"service":"bfstore.catalog.v1.CatalogService"}' \
+  localhost:50051 \
+  grpc.health.v1.Health/Check
+```
+
+Expected response:
+
+```json
+{
+  "status": "SERVING"
+}
+```
+
+## Database
+
+The service uses MySQL as its source of truth.
+
+Current local database assets live under the repo database structure, including:
 
 ```text
-http://localhost:16686
+db/mysql-init/
+db/catalog/migrations/
+db/catalog/seeds/
+```
+
+The current catalog-service iteration uses SQL migration files directly.
+
+When the basket service begins, bfstore will introduce `golang-migrate` as the migration standard for service-owned database migrations.
+
+After the fuller commerce slice is complete, including order placement and payment, bfstore will revisit whether to move from `golang-migrate` to Flyway for broader migration workflow consistency.
+
+## Observability
+
+The catalog service emits:
+
+```text
+traces
+request metrics
+database spans
+database pool metrics
+structured logs
+correlation IDs
+```
+
+Local observability tools:
+
+```text
+Jaeger:     http://localhost:16686
+Prometheus: http://localhost:9090
+Grafana:    http://localhost:3000
+```
+
+## Traces
+
+Jaeger should show traces for gRPC requests.
+
+Expected trace shape:
+
+```text
+/bfstore.catalog.v1.CatalogService/ListProducts
+  -> database/sql span
 ```
 
 Search for:
@@ -237,71 +308,301 @@ Search for:
 catalog-service
 ```
 
-Expected result:
+in Jaeger.
+
+## Request metrics
+
+Request metrics are emitted by the reusable gRPC request metrics interceptor.
+
+Prometheus metric names:
 
 ```text
-a catalog gRPC request span
-one or more database/sql child spans
+bfstore_rpc_server_requests_total
+bfstore_rpc_server_request_duration_count
+bfstore_rpc_server_request_duration_sum
+bfstore_rpc_server_request_duration_bucket
+```
+
+Useful queries:
+
+```promql
+sum(rate(bfstore_rpc_server_requests_total[5m]))
+```
+
+```promql
+sum by (rpc_method) (rate(bfstore_rpc_server_requests_total[5m]))
+```
+
+```promql
+sum(rate(bfstore_rpc_server_requests_total{rpc_grpc_status_code!="OK"}[5m]))
+```
+
+```promql
+sum(rate(bfstore_rpc_server_request_duration_sum[5m]))
+/
+clamp_min(sum(rate(bfstore_rpc_server_request_duration_count[5m])), 1)
+```
+
+## Database metrics
+
+Database pool metrics are emitted from `db.Stats()`.
+
+Prometheus metric names:
+
+```text
+db_client_connections_open
+db_client_connections_in_use
+db_client_connections_idle
+db_client_connections_wait_count
+db_client_connections_wait_duration
+```
+
+Useful queries:
+
+```promql
+db_client_connections_open
+```
+
+```promql
+db_client_connections_in_use
+```
+
+```promql
+db_client_connections_idle
+```
+
+```promql
+rate(db_client_connections_wait_count[5m])
+```
+
+## Grafana dashboard
+
+Expected Grafana folder:
+
+```text
+bfstore
+```
+
+Expected dashboard:
+
+```text
+Catalog Service Overview
+```
+
+Dashboard file:
+
+```text
+deployments/local/grafana/dashboards/catalog-service-overview.json
+```
+
+Dashboard sections:
+
+```text
+Catalog request overview
+Catalog database pool overview
+```
+
+## Local traffic generation
+
+Use the local load script to generate repeatable traffic:
+
+```bash
+REQUESTS=100 SLEEP_SECONDS=0.05 ./scripts/local/catalog-load.sh
+```
+
+This should make request metrics and database pool metrics move in Prometheus and Grafana.
+
+## Testing
+
+Run catalog-service tests:
+
+```bash
+go test ./services/catalog-service/... -v
+```
+
+Run related platform package tests:
+
+```bash
+go test ./pkg/platform/grpc/requestmetrics -v
+go test ./pkg/platform/dbmetrics -v
+go test ./pkg/platform/telemetry -v
+```
+
+Run all tests:
+
+```bash
+go test ./...
+```
+
+## Smoke checklist
+
+The full local smoke checklist is documented here:
+
+```text
+docs/implementation/catalog-service-smoke-checklist.md
+```
+
+Use this checklist before calling the catalog-service iteration complete.
+
+## Graceful shutdown
+
+The service should handle `SIGINT` and `SIGTERM`.
+
+Expected shutdown flow:
+
+```text
+receive shutdown signal
+mark gRPC health NOT_SERVING
+gracefully stop gRPC server
+allow in-flight requests to finish
+close database connection pool
+shutdown telemetry providers
+exit cleanly
 ```
 
 ## Troubleshooting
 
-### Jaeger shows gRPC spans but no DB spans
+### Service does not start
 
-Check that repository methods use context-aware SQL calls:
-
-```go
-QueryContext
-QueryRowContext
-ExecContext
-```
-
-Also confirm telemetry was enabled before the request was sent.
-
-### DB spans appear as separate traces
-
-This usually means request context is not flowing into the repository.
-
-Check the call chain:
+Check:
 
 ```text
-handler ctx
--> service ctx
--> repository ctx
--> QueryContext(ctx, ...)
+database is running
+database credentials are correct
+catalog schema exists
+required environment variables are set
 ```
 
-### SQL driver registration fails
+### Health is NOT_SERVING
 
-If you see a duplicate registration error, ensure the instrumented driver is registered with `sync.Once`.
-
-## Current runtime foundation
-
-The service currently demonstrates:
+Check:
 
 ```text
-gRPC API serving
-standard gRPC health checks
-gRPC reflection for local development
-structured request logging
-correlation ID propagation
-panic recovery
-graceful shutdown
-database readiness checks
-OpenTelemetry bootstrap
-gRPC server tracing instrumentation
-database/sql instrumentation through otelsql
-OpenTelemetry Collector integration
-Jaeger trace visualisation
-Makefile-driven local smoke tests
+database readiness check
+health manager registration
+startup logs
+```
+
+### grpcurl cannot list services
+
+Check:
+
+```text
+GRPC_REFLECTION_ENABLED=true
+service restarted after changing config
+correct port is used
+```
+
+### Jaeger has no traces
+
+Check:
+
+```text
+TELEMETRY_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT is correct
+otel-collector is running
+jaeger is running
+```
+
+### Prometheus has no metrics
+
+Check:
+
+```text
+Prometheus target otel-collector is UP
+Collector metrics pipeline exports to Prometheus
+traffic has been sent after service startup
+```
+
+### Grafana has no data
+
+Check Prometheus first.
+
+If Prometheus has no data, Grafana will have no data.
+
+### Grafana provisioning conflicts
+
+A stale Grafana data volume can conflict with provisioned datasources or dashboards.
+
+For local development only:
+
+```bash
+docker compose down
+docker volume ls
+docker volume rm <project>_bfstore-grafana-data
+docker compose up -d grafana
+```
+
+Use the actual volume name shown by `docker volume ls`.
+
+## Known limitations
+
+This iteration intentionally does not yet include:
+
+```text
+catalog-service Docker Compose runtime service
+CI workflow
+golang-migrate migration runner
+Flyway migration workflow
+production Kubernetes manifests
+authentication / authorisation
+rate limiting
+full ecommerce checkout flow
+basket service integration
+inventory reservation
+order placement
+payment integration
+```
+
+Some of these are planned later. Optional catalog-service extras will be revisited after the basket service is complete.
+
+## Planned follow-ups
+
+After basket service is complete, revisit:
+
+```text
+Dockerise catalog-service inside Docker Compose
+Add CI workflow
+Polish request metrics dashboard docs
+Add ADR for local observability stack
+```
+
+When basket service starts:
+
+```text
+introduce golang-migrate
+update database migration docs
+standardise service-owned migration workflow
+```
+
+After the fuller commerce slice is complete:
+
+```text
+revisit Flyway as a broader migration workflow
+```
+
+## Completion statement
+
+The catalog-service iteration is complete when another engineer can:
+
+```text
+start dependencies
+run the service
+call the gRPC API
+verify health
+run tests
+generate traffic
+inspect traces
+query metrics
+view dashboards
+shut the service down cleanly
+troubleshoot common local issues
 ```
 
 ## Practical rule
 
 ```text
-Platform packages provide reusable plumbing.
-Service packages own service-specific truth.
-Instrumentation belongs at stable boundaries first.
+A service is not complete because it runs on your machine.
+A service is complete when its behaviour can be repeated, observed, and explained.
 ```
 
-Keep it boring where production matters.
