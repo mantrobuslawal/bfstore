@@ -165,51 +165,64 @@ catalog-load: ## Load test catalog service
 
 MYSQL_ROOT_PASSWORD ?= bfstore_root_password
 MYSQL_INIT_PATH ?= deploy/local/mysql/init
-
-.PHONY: local-db-bootstrap
-local-db-bootstrap:
-	docker compose exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/001-create-service-databases.sql
-	docker compose exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/002-create-service-users.sql
-
-MYSQL_ROOT_PASSWORD ?= bfstore_root_password
 MYSQL_VOLUME ?= $(PROJECT_NAME)_bfstore_mysql_data
 
 BASKET_MIGRATIONS_PATH ?= db/basket/migrations
 BASKET_DATABASE_URL ?= mysql://bfstore_basket:bfstore_basket_password@tcp(localhost:3306)/bfstore_basket?multiStatements=true&parseTime=true
 
 .PHONY: local-db-reset
-local-db-reset:
+local-db-reset: ## Stop containers and remove MySQL data volume
 	docker compose -f $(COMPOSE_FILE) down
 	-docker volume rm $(MYSQL_VOLUME)
 
 .PHONY: local-db-up
-local-db-up:
+local-db-up: ## Start local MySQL
 	docker compose -f $(COMPOSE_FILE) up -d mysql
 
 .PHONY: local-db-wait
-local-db-wait:
+local-db-wait: ## Wait for local MySQL to become ready
 	@echo "Waiting for MySQL..."
-	@until docker compose -f $(COMPOSE_FILE) exec mysql mysqladmin ping -h localhost -uroot -p$(MYSQL_ROOT_PASSWORD) --silent; do 		sleep 2; 	done
+	@until docker compose -f $(COMPOSE_FILE) exec -T mysql mysqladmin ping -h localhost -uroot -p$(MYSQL_ROOT_PASSWORD) --silent; do \
+		sleep 2; \
+	done
 	@echo "MySQL is ready."
 
+.PHONY: local-db-bootstrap
+local-db-bootstrap: ## Create local service databases, users, and grants
+	docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/001-create-service-databases.sql
+	docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/002-create-service-users.sql
+
+.PHONY: local-db-check-basket-user
+local-db-check-basket-user: ## Check basket DB user and grants
+	docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e "SELECT user, host FROM mysql.user WHERE user = 'bfstore_basket';"
+	docker compose -f $(COMPOSE_FILE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e "SHOW GRANTS FOR 'bfstore_basket'@'%';"
+
 .PHONY: basket-db-migrate-up
-basket-db-migrate-up:
+basket-db-migrate-up: ## Run basket DB migrations
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" up
 
 .PHONY: basket-db-migrate-down
-basket-db-migrate-down:
+basket-db-migrate-down: ## Roll back one basket DB migration
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" down 1
 
 .PHONY: basket-db-migrate-version
-basket-db-migrate-version:
+basket-db-migrate-version: ## Show basket DB migration version
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" version
 
 .PHONY: basket-db-migrate-force
-basket-db-migrate-force:
-	@if [ -z "$(VERSION)" ]; then 		echo "VERSION is required. Example: make basket-db-migrate-force VERSION=1"; 		exit 1; 	fi
+basket-db-migrate-force: ## Force basket DB migration version. Usage: make basket-db-migrate-force VERSION=1
+	@if [ -z "$(VERSION)" ]; then \
+		echo "VERSION is required. Example: make basket-db-migrate-force VERSION=1"; \
+		exit 1; \
+	fi
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" force $(VERSION)
 
 .PHONY: local-db-fresh
-local-db-fresh: 
-	local-db-reset local-db-up local-db-wait local-db-bootstrap basket-db-migrate-up basket-db-migrate-version
-
+local-db-fresh: ## Rebuild local DB from scratch and run basket migrations
+	$(MAKE) local-db-reset
+	$(MAKE) local-db-up
+	$(MAKE) local-db-wait
+	$(MAKE) local-db-bootstrap
+	$(MAKE) local-db-check-basket-user
+	$(MAKE) basket-db-migrate-up
+	$(MAKE) basket-db-migrate-version
