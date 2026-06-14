@@ -6,7 +6,7 @@ This document outlines the first basket-service gRPC contract.
 
 The goal is to define a small, explicit API that supports the first local basket slice without over-designing checkout, payment, inventory, promotions, or user-account flows.
 
-The first API should support:
+The first API supports:
 
 ```text
 create basket
@@ -16,6 +16,19 @@ update item quantity
 remove item
 clear basket
 ```
+
+## Design decisions reflected in this version
+
+This version reflects the current basket proto shape:
+
+```text
+CreateBasket is included in the first iteration.
+Money values use bfstore.common.v1.Money.
+All timestamps use google.protobuf.Timestamp.
+Basket status is represented by a BasketStatus enum.
+```
+
+Using an enum for basket status gives the contract a clearer set of allowed lifecycle states and avoids free-form status strings drifting across services.
 
 ## Package
 
@@ -40,13 +53,13 @@ option go_package = "github.com/mantrobuslawal/bfstore/proto/gen/go/bfstore/bask
 The basket contract imports:
 
 ```proto
-import "google/protobuf/timestamp.proto";
 import "bfstore/common/v1/money.proto";
+import "google/protobuf/timestamp.proto";
 ```
 
-`google.protobuf.Timestamp` will be used for all time fields.
+`bfstore.common.v1.Money` is used for all API money values.
 
-`bfstore.common.v1.Money` will be used for all API money values.
+`google.protobuf.Timestamp` is used for all time fields.
 
 ## Service
 
@@ -57,13 +70,14 @@ service BasketService {
   rpc CreateBasket(CreateBasketRequest) returns (CreateBasketResponse);
   rpc GetBasket(GetBasketRequest) returns (GetBasketResponse);
   rpc AddItem(AddItemRequest) returns (AddItemResponse);
-  rpc UpdateItemQuantity(UpdateItemQuantityRequest) returns (UpdateItemQuantityResponse);
+  rpc UpdateItemQuantity(UpdateItemQuantityRequest)
+      returns (UpdateItemQuantityResponse);
   rpc RemoveItem(RemoveItemRequest) returns (RemoveItemResponse);
   rpc ClearBasket(ClearBasketRequest) returns (ClearBasketResponse);
 }
 ```
 
-The first iteration is be explicit:
+The first iteration is explicit:
 
 ```text
 CreateBasket
@@ -78,7 +92,47 @@ GetBasket
   -> reads an existing basket
 ```
 
-This is easier to test, document, and troubleshoot.
+This is easier to test, document, and troubleshoot than making `AddItem` create baskets as a hidden side effect.
+
+## Lifecycle enum
+
+### BasketStatus
+
+```proto
+enum BasketStatus {
+  BASKET_STATUS_UNSPECIFIED = 0;
+  BASKET_STATUS_ACTIVE = 1;
+  BASKET_STATUS_CLEARED = 2;
+  BASKET_STATUS_EXPIRED = 3;
+  BASKET_STATUS_CHECKED_OUT = 4;
+}
+```
+
+### Status meanings
+
+| Status | Meaning |
+| --- | --- |
+| `BASKET_STATUS_UNSPECIFIED` | Default value. Should not be used for a valid persisted basket. |
+| `BASKET_STATUS_ACTIVE` | Basket is active and can be modified. |
+| `BASKET_STATUS_CLEARED` | Basket has been cleared. |
+| `BASKET_STATUS_EXPIRED` | Basket has expired. Future lifecycle state. |
+| `BASKET_STATUS_CHECKED_OUT` | Basket has been converted into checkout/order flow. Future lifecycle state. |
+
+For the first implementation slice, the service will primarily use:
+
+```text
+BASKET_STATUS_ACTIVE
+```
+
+`BASKET_STATUS_CLEARED` is available if the first implementation decides to represent cleared baskets as a distinct lifecycle state.
+
+Kuti recommendation for the first slice:
+
+```text
+ClearBasket should remove all items and keep the basket available as BASKET_STATUS_ACTIVE.
+```
+
+A later lifecycle pass can introduce stricter `CLEARED`, `EXPIRED`, and `CHECKED_OUT` semantics if needed.
 
 ## Core messages
 
@@ -89,7 +143,7 @@ message Basket {
   string basket_id = 1;
   repeated BasketItem items = 2;
   bfstore.common.v1.Money subtotal = 3;
-  string status = 4;
+  BasketStatus status = 4;
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
 }
@@ -101,20 +155,9 @@ Notes:
 basket_id is the stable external basket identifier.
 items contains the current basket line items.
 subtotal is the current basket subtotal snapshot.
-status is included for lifecycle visibility.
+status is a typed BasketStatus enum.
 created_at and updated_at use google.protobuf.Timestamp.
 ```
-
-Recommended first status values:
-
-```text
-ACTIVE
-CLEARED
-EXPIRED
-CHECKED_OUT
-```
-
-For the first iteration, only `ACTIVE` and `CLEARED` may be used.
 
 ### BasketItem
 
@@ -198,8 +241,7 @@ Behaviour:
 
 ```text
 If the product/variant pair is not already in the basket, create a new basket item.
-If the same product/variant pair already exists, increase or update quantity according to service rules.
-AddItem should increase quantity for an existing product/variant pair.
+If the same product/variant pair already exists, increase the existing quantity.
 UpdateItemQuantity should replace quantity explicitly.
 ```
 
@@ -253,10 +295,10 @@ message ClearBasketResponse {
 Notes for first slice:
 
 ```text
-ClearBasket should remove all items and keep the basket available as ACTIVE.
+ClearBasket should remove all items and keep the basket available as BASKET_STATUS_ACTIVE.
 ```
 
-A later lifecycle pass can introduce stricter `CLEARED` semantics if needed.
+A later lifecycle pass can introduce stricter `BASKET_STATUS_CLEARED` semantics if needed.
 
 ## Full first-iteration proto sketch
 
@@ -265,8 +307,8 @@ syntax = "proto3";
 
 package bfstore.basket.v1;
 
-import "google/protobuf/timestamp.proto";
 import "bfstore/common/v1/money.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/mantrobuslawal/bfstore/proto/gen/go/bfstore/basket/v1;basketv1";
 
@@ -274,16 +316,25 @@ service BasketService {
   rpc CreateBasket(CreateBasketRequest) returns (CreateBasketResponse);
   rpc GetBasket(GetBasketRequest) returns (GetBasketResponse);
   rpc AddItem(AddItemRequest) returns (AddItemResponse);
-  rpc UpdateItemQuantity(UpdateItemQuantityRequest) returns (UpdateItemQuantityResponse);
+  rpc UpdateItemQuantity(UpdateItemQuantityRequest)
+      returns (UpdateItemQuantityResponse);
   rpc RemoveItem(RemoveItemRequest) returns (RemoveItemResponse);
   rpc ClearBasket(ClearBasketRequest) returns (ClearBasketResponse);
+}
+
+enum BasketStatus {
+  BASKET_STATUS_UNSPECIFIED = 0;
+  BASKET_STATUS_ACTIVE = 1;
+  BASKET_STATUS_CLEARED = 2;
+  BASKET_STATUS_EXPIRED = 3;
+  BASKET_STATUS_CHECKED_OUT = 4;
 }
 
 message Basket {
   string basket_id = 1;
   repeated BasketItem items = 2;
   bfstore.common.v1.Money subtotal = 3;
-  string status = 4;
+  BasketStatus status = 4;
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
 }
@@ -437,7 +488,7 @@ removing unknown basket_item_id -> NotFound
 
 ## Identifier rules
 
-Basket API will use:
+Basket API uses:
 
 ```text
 basket_id
@@ -446,7 +497,7 @@ product_id
 variant_id
 ```
 
-It will not use these as identity:
+It does not use these as identity:
 
 ```text
 product name
@@ -456,17 +507,17 @@ slug
 SKU
 ```
 
-SKU may appear later as snapshot or inventory-related data, but will not replace `product_id` or `variant_id`.
+SKU may appear later as snapshot or inventory-related data, but it does not replace `product_id` or `variant_id`.
 
 ## Money rules
 
-API contracts will use:
+API contracts use:
 
 ```proto
 bfstore.common.v1.Money
 ```
 
-Database storage will still use:
+Database storage still uses:
 
 ```text
 unit_price_minor_units BIGINT
@@ -486,7 +537,7 @@ Convert at the service boundary.
 
 ## Timestamp rules
 
-API contracts will use:
+API contracts use:
 
 ```proto
 google.protobuf.Timestamp
@@ -494,7 +545,7 @@ google.protobuf.Timestamp
 
 for all time fields.
 
-Database storage will use:
+Database storage uses:
 
 ```sql
 TIMESTAMP(6)
@@ -503,6 +554,35 @@ TIMESTAMP(6)
 or another agreed timestamp standard.
 
 The service maps between database timestamp values and Protobuf timestamps.
+
+## Status rules
+
+API contracts use:
+
+```proto
+BasketStatus
+```
+
+rather than a raw string.
+
+Database storage may continue to use:
+
+```sql
+status VARCHAR(32)
+```
+
+for the first implementation, but repository/service mapping should convert database strings to the Protobuf enum.
+
+Recommended local mapping:
+
+| Database value | Protobuf value |
+| --- | --- |
+| `ACTIVE` | `BASKET_STATUS_ACTIVE` |
+| `CLEARED` | `BASKET_STATUS_CLEARED` |
+| `EXPIRED` | `BASKET_STATUS_EXPIRED` |
+| `CHECKED_OUT` | `BASKET_STATUS_CHECKED_OUT` |
+
+The service should not return `BASKET_STATUS_UNSPECIFIED` for a valid persisted basket.
 
 ## Future extensions
 
@@ -518,7 +598,7 @@ GetBasketBySession
 AssociateBasketWithCustomer
 ```
 
-Will not add these in the first slice unless needed.
+These should not be added in the first slice unless needed.
 
 ## Design notes
 
@@ -544,8 +624,21 @@ A shared type avoids schema drift.
 
 Typed timestamps make the Protobuf contract clearer and easier to map consistently across services.
 
+### Why BasketStatus is an enum
+
+Basket lifecycle has a small, known set of states.
+
+Using an enum makes the allowed values explicit, improves generated-code ergonomics, and avoids accidental string drift such as:
+
+```text
+active
+ACTIVE
+Active
+basket_active
+```
+
 ## Practical rule
 
 ```text
-Keep the first BasketService contract small, explicit, and consistent with existing common types.
+Keep the first BasketService contract small, explicit, typed, and consistent with existing common types.
 ```
