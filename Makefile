@@ -53,6 +53,10 @@ proto: proto-lint proto-generate ## Lint and generate Protobuf contracts
 proto-generate-catalog: ## Generate Go code for catalog Protobuf contracts only
 	buf generate --path proto/bfstore/catalog/v1
 
+.PHONY: proto-generate-basket
+proto-generate-basket: ## Generate Go code for basket Protobuf contracts only
+	buf generate --path proto/bfstore/basket/v1
+
 .PHONY: up
 up: ## Start local dependencies and services
 	$(DOCKER_COMPOSE) up -d
