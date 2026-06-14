@@ -1,1 +1,215 @@
-foo
+syntax = "proto3";
+
+package bfstore.basket.v1;
+
+import "bfstore/common/v1/money.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/mantrobuslawal/bfstore/proto/gen/go/bfstore/basket/v1;basketv1";
+
+// BasketService manages a customer's mutable basket before checkout.
+//
+// The basket service owns basket state. It does not own product, variant,
+// inventory, payment, or order truth.
+//
+// Product and variant identifiers reference catalog-owned entities.
+// Money values use the shared bfstore.common.v1.Money type.
+// All time values use google.protobuf.Timestamp.
+service BasketService {
+  // CreateBasket creates an empty active basket.
+  rpc CreateBasket(CreateBasketRequest) returns (CreateBasketResponse);
+
+  // GetBasket returns the current state of an existing basket.
+  rpc GetBasket(GetBasketRequest) returns (GetBasketResponse);
+
+  // AddItem adds a product variant to an existing basket.
+  //
+  // If the same product/variant pair already exists in the basket, the first
+  // implementation should increase the existing quantity.
+  rpc AddItem(AddItemRequest) returns (AddItemResponse);
+
+  // UpdateItemQuantity replaces the quantity for an existing basket item.
+  rpc UpdateItemQuantity(UpdateItemQuantityRequest)
+      returns (UpdateItemQuantityResponse);
+
+  // RemoveItem removes an existing basket item from a basket.
+  rpc RemoveItem(RemoveItemRequest) returns (RemoveItemResponse);
+
+  // ClearBasket removes all items from a basket.
+  //
+  // For the first slice, clearing a basket should leave it available as an
+  // active empty basket.
+  rpc ClearBasket(ClearBasketRequest) returns (ClearBasketResponse);
+}
+
+// BasketStatus represents the lifecycle state of a basket.
+enum BasketStatus {
+  // Default unspecified value.
+  BASKET_STATUS_UNSPECIFIED = 0;
+
+  // Basket is active and can be modified.
+  BASKET_STATUS_ACTIVE = 1;
+
+  // Basket has been cleared.
+  BASKET_STATUS_CLEARED = 2;
+
+  // Basket has expired.
+  BASKET_STATUS_EXPIRED = 3;
+
+  // Basket has been checked out.
+  BASKET_STATUS_CHECKED_OUT = 4;
+}
+
+// Basket represents a customer's current basket state.
+message Basket {
+  // Stable external basket identifier owned by basket-service.
+  string basket_id = 1;
+
+  // Current basket line items.
+  repeated BasketItem items = 2;
+
+  // Current basket subtotal snapshot.
+  bfstore.common.v1.Money subtotal = 3;
+
+  // Basket lifecycle state.
+  BasketStatus status = 4;
+
+  // Basket creation time.
+  google.protobuf.Timestamp created_at = 5;
+
+  // Last basket update time.
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// BasketItem represents one product variant selected by the customer.
+message BasketItem {
+  // Stable external basket item identifier owned by basket-service.
+  string basket_item_id = 1;
+
+  // Stable external product identifier owned by catalog-service.
+  string product_id = 2;
+
+  // Stable external variant identifier owned by catalog-service.
+  string variant_id = 3;
+
+  // Product display-name snapshot captured by basket-service.
+  //
+  // This is not catalog truth.
+  string product_name_snapshot = 4;
+
+  // Variant display-name snapshot captured by basket-service.
+  //
+  // This is not catalog truth.
+  string variant_name_snapshot = 5;
+
+  // Quantity selected by the customer.
+  //
+  // First-slice validation rule: 1 <= quantity <= 99.
+  int32 quantity = 6;
+
+  // Unit price snapshot captured by basket-service.
+  //
+  // Final pricing should be revalidated later during checkout/order placement.
+  bfstore.common.v1.Money unit_price = 7;
+
+  // Line total snapshot, normally unit_price * quantity.
+  bfstore.common.v1.Money line_total = 8;
+
+  // Time this item was first added to the basket.
+  google.protobuf.Timestamp added_at = 9;
+
+  // Last time this item was updated.
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// CreateBasketRequest requests creation of a new empty basket.
+message CreateBasketRequest {
+  // Optional ISO-style 3-letter currency code.
+  //
+  // For local development and the first slice, the service may default this to
+  // GBP when omitted.
+  string currency_code = 1;
+}
+
+// CreateBasketResponse returns the newly created basket.
+message CreateBasketResponse {
+  Basket basket = 1;
+}
+
+// GetBasketRequest requests an existing basket by ID.
+message GetBasketRequest {
+  // Required stable external basket identifier.
+  string basket_id = 1;
+}
+
+// GetBasketResponse returns the requested basket.
+message GetBasketResponse {
+  Basket basket = 1;
+}
+
+// AddItemRequest requests that a product variant is added to a basket.
+message AddItemRequest {
+  // Required stable external basket identifier.
+  string basket_id = 1;
+
+  // Required catalog-owned product identifier.
+  string product_id = 2;
+
+  // Required catalog-owned variant identifier.
+  string variant_id = 3;
+
+  // Required quantity to add.
+  //
+  // First-slice validation rule: 1 <= quantity <= 99.
+  int32 quantity = 4;
+}
+
+// AddItemResponse returns the updated basket.
+message AddItemResponse {
+  Basket basket = 1;
+}
+
+// UpdateItemQuantityRequest requests replacement of a basket item quantity.
+message UpdateItemQuantityRequest {
+  // Required stable external basket identifier.
+  string basket_id = 1;
+
+  // Required stable external basket item identifier.
+  string basket_item_id = 2;
+
+  // Required replacement quantity.
+  //
+  // First-slice validation rule: 1 <= quantity <= 99.
+  // Quantity 0 should not be used as implicit removal; use RemoveItem instead.
+  int32 quantity = 3;
+}
+
+// UpdateItemQuantityResponse returns the updated basket.
+message UpdateItemQuantityResponse {
+  Basket basket = 1;
+}
+
+// RemoveItemRequest requests removal of an item from a basket.
+message RemoveItemRequest {
+  // Required stable external basket identifier.
+  string basket_id = 1;
+
+  // Required stable external basket item identifier.
+  string basket_item_id = 2;
+}
+
+// RemoveItemResponse returns the updated basket.
+message RemoveItemResponse {
+  Basket basket = 1;
+}
+
+// ClearBasketRequest requests removal of all items from a basket.
+message ClearBasketRequest {
+  // Required stable external basket identifier.
+  string basket_id = 1;
+}
+
+// ClearBasketResponse returns the updated empty basket.
+message ClearBasketResponse {
+  Basket basket = 1;
+}
