@@ -163,8 +163,26 @@ observability-logs:
 catalog-load: ## Load test catalog service
 	REQUESTS=100 SLEEP_SECONDS=0.05 ./scripts/local/catalog-load.sh 
 
+MYSQL_ROOT_PASSWORD ?= bfstore_root_password
+MYSQL_VOLUME ?= $(COMPOSE_PROJECT_NAME)_bfstore-mysql-data
+
 BASKET_MIGRATIONS_PATH ?= db/basket/migrations
 BASKET_DATABASE_URL ?= mysql://bfstore_basket:bfstore_basket_password@tcp(localhost:3306)/bfstore_basket?multiStatements=true&parseTime=true
+
+.PHONY: local-db-reset
+local-db-reset:
+	docker compose -f $(COMPOSE_FILE) down
+	-docker volume rm $(MYSQL_VOLUME)
+
+.PHONY: local-db-up
+local-db-up:
+	docker compose -f $(COMPOSE_FILE) up -d mysql
+
+.PHONY: local-db-wait
+local-db-wait:
+	@echo "Waiting for MySQL..."
+	@until docker compose -f $(COMPOSE_FILE) exec mysql mysqladmin ping -h localhost -uroot -p$(MYSQL_ROOT_PASSWORD) --silent; do 		sleep 2; 	done
+	@echo "MySQL is ready."
 
 .PHONY: basket-db-migrate-up
 basket-db-migrate-up:
@@ -180,11 +198,11 @@ basket-db-migrate-version:
 
 .PHONY: basket-db-migrate-force
 basket-db-migrate-force:
-	@if [ -z "$(VERSION)" ]; then \
-		echo "VERSION is required. Example: make basket-db-migrate-force VERSION=1"; \
-		exit 1; \
-	fi
+	@if [ -z "$(VERSION)" ]; then 		echo "VERSION is required. Example: make basket-db-migrate-force VERSION=1"; 		exit 1; 	fi
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" force $(VERSION)
+
+.PHONY: local-db-fresh
+local-db-fresh: local-db-reset local-db-up local-db-wait basket-db-migrate-up basket-db-migrate-version
 
 
 
