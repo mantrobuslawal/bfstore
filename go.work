@@ -2,5 +2,6 @@ go 1.26.3
 
 use (
 	.
+	./services/basket-service
 	./services/catalog-service
 )
