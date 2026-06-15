@@ -13,7 +13,7 @@ type Money struct {
 // ProductID represents a catalog product identifier.
 type ProductID string
 
-// VariantID represents a catalog product identifier.
+// VariantID represents the identifier of a catalog product variant.
 type VariantID string
 
 // ImageID represents a catalog product image identifier.

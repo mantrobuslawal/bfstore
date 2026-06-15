@@ -1,9 +1,6 @@
 package catalog
 
-import (
-	//"errors"
-	"strings"
-)
+import "strings"
 
 // LifecycleStatus interface represents life phases of catalog objects such as
 // products, product categories and product variants.
