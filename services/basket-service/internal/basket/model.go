@@ -67,12 +67,12 @@ func (id VariantID) IsValid() bool {
 // BasketItem represents an unique basket line item e.g. a unique product type
 // in the basket.
 type BasketItem struct {
-	BasketID            BasketID
+	BasketItemID        BasketItemID
 	ProductID           ProductID
 	VariantID           VariantID
 	ProductNameSnapShot string
 	VariantNameSnapShot string
-	quantity            int
+	Quantity            int
 	UnitPrice           Money
 	LineTotal           Money
 	AddedAt             time.Time
@@ -81,12 +81,12 @@ type BasketItem struct {
 
 // Basket represents a store shopping basket.
 type Basket struct {
-	BasketItemID BasketItemID
-	BasketItems  []*BasketItem
-	Subtotal     Money
-	Status       BasketStatus
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	BasketID    BasketID
+	BasketItems []*BasketItem
+	Subtotal    Money
+	Status      BasketStatus
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // BasketQuery represents filter options that maybe passed from
