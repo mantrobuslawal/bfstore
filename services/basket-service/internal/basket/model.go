@@ -10,7 +10,7 @@ type CurrencyCode string
 
 const defaultCurrencyCode = "gbp"
 
-func (c CurrencyCode) isValid() bool {
+func (c CurrencyCode) IsValid() bool {
 	normalisedCurrency := strings.TrimSpace(strings.ToLower(string(c)))
 
 	if normalisedCurrency == "" {
@@ -35,7 +35,7 @@ type Money struct {
 // BasketID represents a basket identifier.
 type BasketID string
 
-func (id BasketID) isValid() bool {
+func (id BasketID) IsValid() bool {
 	// implement
 	return true
 }
@@ -43,7 +43,7 @@ func (id BasketID) isValid() bool {
 // BasketItemID represents a basket identifier.
 type BasketItemID string
 
-func (id BasketItemID) isValid() bool {
+func (id BasketItemID) IsValid() bool {
 	// implement
 	return true
 }
@@ -51,7 +51,7 @@ func (id BasketItemID) isValid() bool {
 // ProductID represents a catalog product identifier.
 type ProductID string
 
-func (id ProductID) isValid() bool {
+func (id ProductID) IsValid() bool {
 	// implement
 	return true
 }
@@ -59,7 +59,7 @@ func (id ProductID) isValid() bool {
 // VariantID represents the identifier of a catalog product variant.
 type VariantID string
 
-func (id VariantID) isValid() bool {
+func (id VariantID) IsValid() bool {
 	// implement
 	return true
 }
@@ -93,11 +93,13 @@ type Basket struct {
 // the grpc request to the service and then forwarded to the
 // repository layer to filter results.
 // Depending on the request some fields maybe empty.
+//
+// Accepts strings from gRPC layer and validates at Service layer.
 type BasketQuery struct {
-	CurrencyCode string // make into type
-	BasketID     BasketID
-	BasketItemID BasketItemID
-	ProductID    ProductID
-	VariantID    VariantID
+	CurrencyCode string
+	BasketID     string
+	BasketItemID string
+	ProductID    string
+	VariantID    string
 	Quantity     int
 }
