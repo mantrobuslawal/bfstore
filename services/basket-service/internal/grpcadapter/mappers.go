@@ -11,10 +11,17 @@ import (
 )
 
 func mapBasketToProto(basket basket.Basket) (*basketv1.Basket, error) {
-	protoItems := make([]*basketv1.BasketItem, 0, len(basket.BasketItems))
-	for _, item := range basket.BasketItems {
-		protoBasketItem := mapBasketItemToProto(*item)
-		protoItems = append(protoItems, protoBasketItem)
+	var protoItems []*basketv1.BasketItem
+
+	// There are cases when a basket with zero basket items will be mapped,
+	// such as when a call to ClearBasket is made. We want to avoid creating
+	// a proto basket items slice, but still want to map other basket fields.
+	if len(basket.BasketItems) > 0 {
+		protoItems = make([]*basketv1.BasketItem, 0, len(basket.BasketItems))
+		for _, item := range basket.BasketItems {
+			protoBasketItem := mapBasketItemToProto(*item)
+			protoItems = append(protoItems, protoBasketItem)
+		}
 	}
 
 	status, err := mapBasketStatusToProto(basket.Status)

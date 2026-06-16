@@ -36,7 +36,7 @@ func NewBasketHandler(basketService *basket.Service, logger *slog.Logger) *Baske
 	}
 }
 
-// CreateBasket
+// CreateBasket creates a basket and returns the basket's id.
 func (h *BasketHandler) CreateBasket(ctx context.Context, req *basketv1.CreateBasketRequest) (*basketv1.CreateBasketResponse, error) {
 	if req == nil {
 		return &basketv1.CreateBasketResponse{}, status.Error(codes.InvalidArgument, "request is required")
@@ -59,7 +59,7 @@ func (h *BasketHandler) CreateBasket(ctx context.Context, req *basketv1.CreateBa
 	}, nil
 }
 
-// GetBasket
+// GetBasket retrieve's a previoulsy created basket. It requires the basket's id.
 func (h *BasketHandler) GetBasket(ctx context.Context, req *basketv1.GetBasketRequest) (*basketv1.GetBasketResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
@@ -77,9 +77,13 @@ func (h *BasketHandler) GetBasket(ctx context.Context, req *basketv1.GetBasketRe
 		return &basketv1.GetBasketResponse{}, mapServiceError(err)
 	}
 
-	basket, err := mapBasketToProto(result)
-	if err != nil {
-		return &basketv1.GetBasketResponse{}, mapServiceError(err)
+	var basket *basketv1.Basket
+
+	if len(result.BasketItems) > 0 { // If GetBasket called for an empty basket.
+		basket, err = mapBasketToProto(result)
+		if err != nil {
+			return &basketv1.GetBasketResponse{}, mapServiceError(err)
+		}
 	}
 
 	return &basketv1.GetBasketResponse{
@@ -87,7 +91,8 @@ func (h *BasketHandler) GetBasket(ctx context.Context, req *basketv1.GetBasketRe
 	}, nil
 }
 
-// AddItem
+// AddItem adds a new bask item to an exisiting basket. it requires the basket id, product id,
+// product variant id and quantity. The item shouldn't already exist in the basket.
 func (h *BasketHandler) AddItem(ctx context.Context, req *basketv1.AddItemRequest) (*basketv1.AddItemResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
@@ -112,6 +117,7 @@ func (h *BasketHandler) AddItem(ctx context.Context, req *basketv1.AddItemReques
 		BasketID:  basketId,
 		ProductID: productId,
 		VariantID: variantId,
+		Quantity:  int(req.GetQuantity()),
 	})
 	if err != nil {
 		return &basketv1.AddItemResponse{}, mapServiceError(err)
@@ -127,7 +133,7 @@ func (h *BasketHandler) AddItem(ctx context.Context, req *basketv1.AddItemReques
 	}, nil
 }
 
-// UpdateItemQuantity
+// UpdateItemQuantity updates the quantity of a basket item. It requires the basket id, basket item id and quantity.
 func (h *BasketHandler) UpdateItemQuantity(ctx context.Context, req *basketv1.UpdateItemQuantityRequest) (*basketv1.UpdateItemQuantityResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
@@ -162,7 +168,7 @@ func (h *BasketHandler) UpdateItemQuantity(ctx context.Context, req *basketv1.Up
 	}, nil
 }
 
-// RemoveItem
+// RemoveItem removes a basket item from the from basket. It requires the basket id and basket item id.
 func (h *BasketHandler) RemoveItem(ctx context.Context, req *basketv1.RemoveItemRequest) (*basketv1.RemoveItemResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
@@ -196,7 +202,7 @@ func (h *BasketHandler) RemoveItem(ctx context.Context, req *basketv1.RemoveItem
 	}, nil
 }
 
-// ClearBasket
+// ClearBasket removes all basket items from the basket. It requires the basket id.
 func (h *BasketHandler) ClearBasket(ctx context.Context, req *basketv1.ClearBasketRequest) (*basketv1.ClearBasketResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
