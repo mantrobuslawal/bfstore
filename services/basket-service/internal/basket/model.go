@@ -37,34 +37,14 @@ type Money struct {
 // BasketID represents a basket identifier.
 type BasketID string
 
-func (id BasketID) IsValid() bool {
-	// implement
-	return true
-}
-
 // BasketItemID represents a basket identifier.
 type BasketItemID string
-
-func (id BasketItemID) IsValid() bool {
-	// implement
-	return true
-}
 
 // ProductID represents a catalog product identifier.
 type ProductID string
 
-func (id ProductID) IsValid() bool {
-	// implement
-	return true
-}
-
 // VariantID represents the identifier of a catalog product variant.
 type VariantID string
-
-func (id VariantID) IsValid() bool {
-	// implement
-	return true
-}
 
 // BasketItem represents an unique basket line item e.g. a unique product type
 // in the basket.

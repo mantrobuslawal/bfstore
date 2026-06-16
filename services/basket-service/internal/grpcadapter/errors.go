@@ -17,9 +17,28 @@ func mapServiceError(err error) error {
 		errors.Is(err, basket.ErrInvalidQuantity),
 		errors.Is(err, basket.ErrInvalidSubTotal),
 		errors.Is(err, basket.ErrUnknownItemID),
-		errors.Is(err, basket.ErrInvalidCurrenyCode):
+		errors.Is(err, basket.ErrInvalidCurrenyCode),
+		errors.Is(err, basket.ErrMissingProductID),
+		errors.Is(err, basket.ErrMissingVariantID):
 
 		return status.Error(codes.InvalidArgument, err.Error())
+
+	case errors.Is(err, basket.ErrBasketNotFound),
+		errors.Is(err, basket.ErrProductNotFound),
+		errors.Is(err, basket.ErrVariantNotFound):
+		return status.Error(codes.NotFound, "not found")
+
+	case errors.Is(err, basket.ErrProductNotSellable):
+		return status.Error(codes.FailedPrecondition, "product or variant not sellable")
+
+	case errors.Is(err, basket.ErrProductVariantMismatch):
+		return status.Error(codes.FailedPrecondition, "product and variant mismatch")
+
+	case errors.Is(err, basket.ErrBasketNotModifiable):
+		return status.Error(codes.FailedPrecondition, "basket not modifiable")
+
+	case errors.Is(err, basket.ErrCatalogServiceUnavailable):
+		return status.Error(codes.Unavailable, "catalog service unavailable")
 
 	default:
 		return status.Error(codes.Internal, "internal server error")
