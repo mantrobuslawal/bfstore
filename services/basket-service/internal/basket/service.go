@@ -2,14 +2,27 @@ package basket
 
 //TODO LOG IN THIS PACKAGE NOT ENOUGH LOGGING
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
 
 // Service contains Basket business logic.
-type Service struct{ repository Repository }
+type Service struct {
+	repository Repository
+	logger     *slog.Logger
+}
 
 // NewService creates a Basket Service
-func NewService(repo Repository) *Service {
-	return &Service{repository: repo}
+func NewService(repo Repository, logger *slog.Logger) *Service {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &Service{
+		repository: repo,
+		logger:     logger,
+	}
 }
 
 // CreateBasket creates an empty basket and returns its basket id.
