@@ -8,19 +8,21 @@ import (
 // CurrencyCode represents an ISO 4217 Currency Code.
 type CurrencyCode string
 
-const defaultCurrencyCode = "gbp"
+const (
+	defaultCurrencyCode = "gbp"
+)
 
-func (c CurrencyCode) IsValid() bool {
+func (c CurrencyCode) isValid() (bool, bool) {
 	normalisedCurrency := strings.TrimSpace(strings.ToLower(string(c)))
 
 	if normalisedCurrency == "" {
-		c = "GBP" // Default Currency is GBP
-		return true
+		c = "GBP"
+		return true, true // currency code is valid and default code was set
 	}
 	if normalisedCurrency != defaultCurrencyCode { // Store only handles GBP currently.
-		return false
+		return false, false // currency code is invalid, no default code set
 	}
-	return false
+	return true, false // currency code is valid, no default code set
 
 }
 

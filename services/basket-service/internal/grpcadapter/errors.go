@@ -16,7 +16,8 @@ func mapServiceError(err error) error {
 		errors.Is(err, basket.ErrInvalidItemID),
 		errors.Is(err, basket.ErrInvalidQuantity),
 		errors.Is(err, basket.ErrInvalidSubTotal),
-		errors.Is(err, basket.ErrUnknownItemID):
+		errors.Is(err, basket.ErrUnknownItemID),
+		errors.Is(err, basket.ErrInvalidCurrenyCode):
 
 		return status.Error(codes.InvalidArgument, err.Error())
 

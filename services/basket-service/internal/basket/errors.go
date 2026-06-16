@@ -12,4 +12,5 @@ var (
 	ErrInvalidBasketID     = errors.New("invalid basket id")
 	ErrInvalidSubTotal     = errors.New("invalid subtotal")
 	ErrInvalidBasketStatus = errors.New("invalid basket status")
+	ErrInvalidCurrenyCode  = errors.New("invalid currency code")
 )

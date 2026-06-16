@@ -1,10 +1,9 @@
 package basket
 
-//TODO LOG IN THIS PACKAGE NOT ENOUGH LOGGING
-
 import (
 	"context"
 	"log/slog"
+	"time"
 )
 
 // Service contains Basket business logic.
@@ -27,7 +26,26 @@ func NewService(repo Repository, logger *slog.Logger) *Service {
 
 // CreateBasket creates an empty basket and returns its basket id.
 func (s *Service) CreateBasket(ctx context.Context, query BasketQuery) (Basket, error) {
-	// TODO: Implement
+	currencyCode := CurrencyCode(query.CurrencyCode)
+	currencyIsValid, defaultCurrencySet := currencyCode.isValid()
+
+	if !currencyIsValid {
+		s.logger.DebugContext(ctx, "invalid basket currency code", "invalid_currency_code", string(currencyCode))
+		return Basket{}, ErrInvalidCurrenyCode
+	}
+	if defaultCurrencySet {
+		s.logger.DebugContext(ctx, "basket currency defaulted",
+			"default_currency_code", string(currencyCode))
+	}
+
+	basket := Basket{
+		BasketID:    NewBasketID(),
+		Status:      BasketStatusActive,
+		Subtotal:    Money{CurrencyCode: currencyCode},
+		CreatedAt:   time.Now(),
+		BasketItems: nil,
+	}
+
 	return Basket{}, nil
 }
 
