@@ -67,7 +67,10 @@ func (s *Service) CreateBasket(ctx context.Context, query BasketQuery) (Basket, 
 
 	created, err := s.repository.CreateBasket(ctx, basket)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to create new basket", "error", err, "basket_id", basket.BasketID, "currency_code", currencyCode)
+		s.logger.ErrorContext(ctx, "failed to create new basket",
+			"error", err,
+			"basket_id", basket.BasketID,
+			"currency_code", code)
 		return Basket{}, fmt.Errorf("persist newly created basket: %w", err)
 	}
 
@@ -138,7 +141,10 @@ func (s *Service) AddItem(ctx context.Context, query BasketQuery) (Basket, error
 		s.logger.ErrorContext(ctx, "failed to load basket before adding item", "basket_id", basketId, "error", err)
 		return Basket{}, fmt.Errorf("load basket before adding item: %w", err)
 	}
-	s.logger.InfoContext(ctx, "basket retrieved", "basket_id", currentBasket.BasketID, "currency_code", string(currentBasket.Subtotal.CurrencyCode), "status", string(basket.Status))
+	s.logger.InfoContext(ctx, "basket retrieved",
+		"basket_id", currentBasket.BasketID,
+		"currency_code", string(currentBasket.Subtotal.CurrencyCode),
+		"status", currentBasket.Status)
 
 	// validate basket status
 	if currentBasket.Status != BasketStatusActive {
