@@ -74,7 +74,10 @@ func (s *Service) CreateBasket(ctx context.Context, query BasketQuery) (Basket, 
 		return Basket{}, fmt.Errorf("persist newly created basket: %w", err)
 	}
 
-	s.logger.InfoContext(ctx, "basket created", "basket_id", created.BasketID, "currency_code", string(created.Subtotal.CurrencyCode), "status", string(created.Status))
+	s.logger.InfoContext(ctx, "basket created",
+		"basket_id", created.BasketID,
+		"currency_code", created.Subtotal.CurrencyCode,
+		"status", created.Status)
 
 	return created, nil
 }
@@ -94,7 +97,7 @@ func (s *Service) GetBasket(ctx context.Context, query BasketQuery) (Basket, err
 		}
 	}
 
-	basket, err := s.repository.GetBasket(ctx, BasketID(basketId))
+	basket, err := s.repository.GetBasket(ctx, basketId)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to get basket", "basket_id", basketId, "error", err)
 		return Basket{}, fmt.Errorf("get basket: %w", err)
@@ -129,7 +132,7 @@ func (s *Service) AddItem(ctx context.Context, query BasketQuery) (Basket, error
 	}
 
 	// get basket
-	currentBasket, err := s.repository.GetBasket(ctx, BasketID(basketId))
+	currentBasket, err := s.repository.GetBasket(ctx, basketId)
 	if err != nil {
 
 		if errors.Is(err, ErrBasketNotFound) {

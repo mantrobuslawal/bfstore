@@ -66,6 +66,7 @@ type VariantID string
 // in the basket.
 type BasketItem struct {
 	BasketItemID        BasketItemID
+	BasketID            BasketID
 	ProductID           ProductID
 	VariantID           VariantID
 	ProductNameSnapShot string
@@ -73,6 +74,7 @@ type BasketItem struct {
 	Quantity            int
 	UnitPrice           Money
 	LineTotal           Money
+	CurrencyCode        CurrencyCode
 	AddedAt             time.Time
 	UpdatedAt           time.Time
 }
