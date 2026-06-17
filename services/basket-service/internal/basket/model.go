@@ -26,6 +26,22 @@ func (c CurrencyCode) isValid() (bool, bool) {
 
 }
 
+// ValidateProductVariantQuery
+type ValidateProductVariantQuery struct {
+	ProductID string
+	VariantID string
+}
+
+// CatalogProductVariant
+type CatalogProductVariant struct {
+	ProductID   string
+	VariantID   string
+	ProductName string
+	VariantName string
+	UnitPrice   Money
+	Sellable    bool
+}
+
 // Money represents a monetary value in minor units.
 //
 // This mirrors the Protobuf Money contract.
