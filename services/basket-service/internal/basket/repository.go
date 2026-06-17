@@ -123,6 +123,8 @@ func (r *MySQLRepository) GetBasket(ctx context.Context, basketID string) (Baske
 	defer rows.Close()
 
 	basketItems := make([]*BasketItem, 0)
+	var subtotal int64
+
 	for rows.Next() {
 		var basketItem BasketItem
 
@@ -135,7 +137,7 @@ func (r *MySQLRepository) GetBasket(ctx context.Context, basketID string) (Baske
 			&basketItem.VariantNameSnapShot,
 			&basketItem.Quantity,
 			&basketItem.UnitPrice,
-			&basketItem.LineTotal,
+			&basketItem.LineTotal.AmountMinor,
 			&basketItem.CurrencyCode,
 			&basketItem.AddedAt,
 			&basketItem.UpdatedAt,
@@ -146,6 +148,8 @@ func (r *MySQLRepository) GetBasket(ctx context.Context, basketID string) (Baske
 			)
 			return Basket{}, fmt.Errorf("get row basket item: %w", err)
 		}
+
+		subtotal += basketItem.LineTotal.AmountMinor
 
 		basketItems = append(basketItems, &basketItem)
 	}
@@ -159,6 +163,7 @@ func (r *MySQLRepository) GetBasket(ctx context.Context, basketID string) (Baske
 	}
 
 	basket.BasketItems = basketItems
+	basket.Subtotal.AmountMinor = subtotal
 
 	return basket, nil
 }
