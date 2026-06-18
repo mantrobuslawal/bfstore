@@ -9,12 +9,14 @@ import (
 
 // Config contains runtime configuration for Catalogue Service.
 type Config struct {
-	Environment          string
-	LogLevel             string
-	GRPCPort             string
-	EnableGRPCReflection bool
-	Database             DatabaseConfig
-	Telemetry            TelemetryConfig
+	Environment           string
+	LogLevel              string
+	GRPCPort              string
+	EnableGRPCReflection  bool
+	Database              DatabaseConfig
+	Telemetry             TelemetryConfig
+	CatalogGRPCAddress    string
+	CatalogRequestTimeout time.Duration
 }
 
 // DatabaseConfig contains MySQL connection configuration.
@@ -41,9 +43,11 @@ type TelemetryConfig struct {
 // Load reads configuration from environment variables.
 func Load() (Config, error) {
 	cfg := Config{
-		Environment: getEnv("ENVIRONMENT", "local"),
-		LogLevel:    getEnv("LOG_LEVEL", "info"),
-		GRPCPort:    getEnv("BASKET_SERVICE_GRPC_PORT", "50052"),
+		Environment:           getEnv("ENVIRONMENT", "local"),
+		LogLevel:              getEnv("LOG_LEVEL", "info"),
+		GRPCPort:              getEnv("BASKET_SERVICE_GRPC_PORT", "50052"),
+		CatalogGRPCAddress:    getEnv("CATALOG_GRPC_ADDR", "localhost:50051"),
+		CatalogRequestTimeout: loadTimeEnv("CATALOG_REQUEST_TIMEOUT", "2s"),
 		Database: DatabaseConfig{
 			Host:     getEnv("MYSQL_HOST", "localhost"),
 			Port:     getEnv("MYSQL_PORT", "3306"),
@@ -60,7 +64,7 @@ func Load() (Config, error) {
 			TelemetryEnabled:      loadBoolEnv("TELEMETRY_ENABLED", false),
 			TracesEnabled:         loadBoolEnv("TRACES_ENABLED", true),
 			MetricsEnabled:        loadBoolEnv("METRICS_ENABLED", true),
-			MetricsExportInterval: loadTimeEnv("METRICS_EXPORT_INTERVAL"),
+			MetricsExportInterval: loadTimeEnv("METRICS_EXPORT_INTERVAL", "10s"),
 		},
 	}
 
@@ -108,20 +112,21 @@ func loadBoolEnv(key string, fallback bool) bool {
 	}
 }
 
-func loadTimeEnv(key string) time.Duration {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		fallback, _ := time.ParseDuration("0s")
-		return fallback
+func loadTimeEnv(key string, fallback string) time.Duration {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		value = fallback
 	}
 
-	// expecting a string number e.g. "10" or "5"
-	newValue := []string{value, "s"}
-	value = strings.Join(newValue, "")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+
 	duration, err := time.ParseDuration(value)
 	if err != nil {
-		fallback, _ := time.ParseDuration("0s")
-		return fallback
+		return 0
 	}
+
 	return duration
 }
