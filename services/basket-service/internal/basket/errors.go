@@ -25,4 +25,5 @@ var (
 	ErrProductNotSellable           = errors.New("product or variant is not sellable")
 	ErrBasketCurrencyMismatch       = errors.New("basket currency does not match catalog item currency")
 	ErrCouldNotAllocateItemID       = errors.New("could not allocate unique basket item id")
+	ErrBasketItemNotFound           = errors.New("basket item not found")
 )

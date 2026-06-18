@@ -139,3 +139,9 @@ type ValidateProductVariantQuery struct {
 	ProductID string
 	VariantID string
 }
+
+type lockedBasketItem struct {
+	ID                  string
+	UnitPriceMinorUnits int64
+	CurrencyCode        string
+}

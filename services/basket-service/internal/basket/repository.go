@@ -201,20 +201,382 @@ func (r *MySQLRepository) AddItem(ctx context.Context, cmd AddValidatedItemComma
 
 // UpdateItemQuantity
 func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, query BasketQuery) (Basket, error) {
+	if query.Quantity < minBasketQuantity || query.Quantity > maxBasketQuantity {
+		return Basket{}, ErrInvalidQuantity
+	}
 
-	return Basket{}, nil
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to begin update item quantity transaction",
+			"error", err,
+			"basket_id", query.BasketID,
+			"basket_item_id", query.BasketItemID,
+		)
+
+		return Basket{}, fmt.Errorf("begin update item quantity transaction: %w", err)
+	}
+
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "failed to roll back update item quantity transaction",
+				"error", rollbackErr,
+				"basket_id", query.BasketID,
+				"basket_item_id", query.BasketItemID,
+			)
+		}
+	}()
+
+	if _, err := r.lockBasketForUpdate(ctx, tx, query.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	item, err := r.lockBasketItemForUpdate(ctx, tx, query.BasketID, query.BasketItemID)
+	if err != nil {
+		return Basket{}, err
+	}
+
+	if err := r.updateBasketItemQuantity(ctx, tx, query, item); err != nil {
+		return Basket{}, err
+	}
+
+	if err := r.touchBasket(ctx, tx, query.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.logger.ErrorContext(ctx, "failed to commit update item quantity transaction",
+			"error", err,
+			"basket_id", query.BasketID,
+			"basket_item_id", query.BasketItemID,
+			"quantity", query.Quantity,
+		)
+
+		return Basket{}, fmt.Errorf("commit update item quantity transaction: %w", err)
+	}
+
+	committed = true
+
+	r.logger.DebugContext(ctx, "basket item quantity updated",
+		"basket_id", query.BasketID,
+		"basket_item_id", query.BasketItemID,
+		"quantity", query.Quantity,
+	)
+
+	updatedBasket, err := r.GetBasket(ctx, query.BasketID)
+	if err != nil {
+		return Basket{}, fmt.Errorf("load basket after updating item quantity: %w", err)
+	}
+
+	return updatedBasket, nil
 }
 
 // RemoveItem
 func (r *MySQLRepository) RemoveItem(ctx context.Context, query BasketQuery) (Basket, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to begin remove item transaction",
+			"error", err,
+			"basket_id", query.BasketID,
+			"basket_item_id", query.BasketItemID,
+		)
+		return Basket{}, fmt.Errorf("begin remove item transaction; %w", err)
+	}
 
-	return Basket{}, nil
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "failed to roll back remove item transaction",
+				"error", rollbackErr,
+				"basked_id", query.BasketID,
+				"basket_item_id", query.BasketItemID,
+			)
+		}
+	}()
+
+	if _, err := r.lockBasketForUpdate(ctx, tx, query.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	if err := r.deleteBasketItem(ctx, tx, query); err != nil {
+		return Basket{}, err
+	}
+
+	if err := r.touchBasket(ctx, tx, query.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.logger.ErrorContext(ctx, "failed to commit remove item transaction",
+			"error", err,
+			"basket_id", query.BasketID,
+			"basket_item_id", query.BasketItemID,
+		)
+
+		return Basket{}, fmt.Errorf("commit remove item transaction: %w", err)
+	}
+
+	committed = true
+
+	r.logger.DebugContext(ctx, "basket item removed",
+		"basket_id", query.BasketID,
+		"basket_item_id", query.BasketItemID,
+	)
+
+	updatedBasket, err := r.GetBasket(ctx, query.BasketID)
+	if err != nil {
+		return Basket{}, fmt.Errorf("load basket after removing item: %w", err)
+	}
+
+	return updatedBasket, nil
 }
 
 // ClearBasket
 func (r *MySQLRepository) ClearBasket(ctx context.Context, query BasketQuery) (Basket, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to begin clear basket transaction",
+			"error", err,
+			"basket_id", query.BasketID,
+		)
 
-	return Basket{}, nil
+		return Basket{}, fmt.Errorf("begin clear basket transaction: %w", err)
+	}
+
+	commited := false
+	defer func() {
+		if commited {
+			return
+		}
+
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "failed to roll back clear basket transaction",
+				"error", rollbackErr,
+				"basket_id", query.BasketID,
+			)
+		}
+	}()
+
+	if _, err := r.lockBasketForUpdate(ctx, tx, query.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	deleteCount, err := r.deleteBasketItems(ctx, tx, query.BasketID)
+	if err != nil {
+		return Basket{}, err
+	}
+
+	if err := r.touchBasket(ctx, tx, query.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.logger.ErrorContext(ctx, "failed to commit clear basket transaction",
+			"error", err,
+			"basket_id", query.BasketID,
+		)
+
+		return Basket{}, fmt.Errorf("commit clear basket transaction: %w", err)
+	}
+
+	commited = true
+
+	r.logger.DebugContext(ctx, "basket cleared",
+		"basket_id", query.BasketID,
+		"deleted_item_count", deleteCount,
+	)
+
+	updatedBasket, err := r.GetBasket(ctx, query.BasketID)
+	if err != nil {
+		return Basket{}, fmt.Errorf("load basket after clearing: %w", err)
+	}
+
+	return updatedBasket, nil
+}
+
+func (r *MySQLRepository) deleteBasketItems(
+	ctx context.Context,
+	tx *sql.Tx,
+	basketID string,
+) (int64, error) {
+	const query = `
+		DELETE FROM basket_items
+		WHERE basket_id =?
+	`
+
+	result, err := tx.ExecContext(ctx, query, basketID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to delete basket items",
+			"error", err,
+			"basket_id", basketID,
+		)
+
+		return 0, fmt.Errorf("delete basket items: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read clear basket rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
+func (r *MySQLRepository) updateBasketItemQuantity(
+	ctx context.Context,
+	tx *sql.Tx,
+	query BasketQuery,
+	item lockedBasketItem,
+) error {
+	lineTotalMinorUnits := int64(query.Quantity) * item.UnitPriceMinorUnits
+
+	const updateItemQuery = `
+		UPDATE basket_items
+		SET
+			quantity = ?,
+			line_total_minor_units = ?,
+			updated_at = CURRENT_TIMESTAMP(6)
+		WHERE basket_id = ?
+			AND basket_item_id = ?
+	`
+	args := []any{
+		query.Quantity,
+		lineTotalMinorUnits,
+		query.BasketID,
+		query.BasketItemID,
+	}
+
+	result, err := tx.ExecContext(
+		ctx,
+		updateItemQuery,
+		args...,
+	)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to update basket item quantity",
+			"error", err,
+			"basket_id", query.BasketID,
+			"basket_item_id", query.BasketItemID,
+			"quantity", query.Quantity,
+			"line_total_minor_units", lineTotalMinorUnits,
+		)
+
+		return fmt.Errorf("update basket item quantity: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read update basket item quantity rows affected: %w", err)
+	}
+
+	if rowsAffected != 1 {
+		return fmt.Errorf(
+			"update basket item quantity: expected 1 row affected, got %d",
+			rowsAffected,
+		)
+	}
+	return nil
+}
+
+func (r *MySQLRepository) lockBasketItemForUpdate(
+	ctx context.Context,
+	tx *sql.Tx,
+	basketID string,
+	BasketItemID string,
+) (lockedBasketItem, error) {
+	const query = `
+		SELECT
+			basket_item_id,
+			unit_price_minor_units,
+			currency_code
+		FROM basket_items
+		WHERE basket_id = ?
+			AND basket_item_id = ?
+		FOR UPDATE
+	`
+
+	var item lockedBasketItem
+
+	err := tx.QueryRowContext(
+		ctx,
+		query,
+		basketID,
+		BasketItemID,
+	).Scan(
+		&item.ID,
+		&item.UnitPriceMinorUnits,
+		&item.CurrencyCode,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return lockedBasketItem{}, ErrBasketItemNotFound
+		}
+
+		r.logger.ErrorContext(ctx, "failed to lock basket item for quantity update",
+			"error", err,
+			"basket_id", basketID,
+			"basket_item_id", BasketItemID,
+		)
+
+		return lockedBasketItem{}, fmt.Errorf("lock basket item for quantity update: %w", err)
+	}
+
+	return item, nil
+
+}
+
+func (r *MySQLRepository) deleteBasketItem(
+	ctx context.Context,
+	tx *sql.Tx,
+	query BasketQuery,
+) error {
+	const deleteItemQuery = `
+		DELETE FROM basket_items
+		WHERE basket_id = ?
+		  AND basket_item_id = ?
+	`
+
+	args := []any{query.BasketID, query.BasketItemID}
+
+	result, err := tx.ExecContext(
+		ctx,
+		deleteItemQuery,
+		args...,
+	)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to delete basket item",
+			"error", err,
+			"basket_id", query.BasketID,
+			"basket_item_id", query.BasketItemID,
+		)
+
+		return fmt.Errorf("delete basket item: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read delete basket item rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrBasketItemNotFound
+	}
+
+	if rowsAffected != 1 {
+		return fmt.Errorf(
+			"delete basket item: expected 1 row affected, got %d",
+			rowsAffected,
+		)
+	}
+
+	return nil
 }
 
 func (r *MySQLRepository) addItemOnce(ctx context.Context, cmd AddValidatedItemCommand) (Basket, error) {
