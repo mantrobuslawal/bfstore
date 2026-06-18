@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+const (
+	minBasketQuantity = 1
+	maxBasketQuantity = 99
+
+	maxIDGenerationAttempts = 3
+)
+
 // CurrencyCode represents an ISO 4217 Currency Code.
 type CurrencyCode string
 
@@ -24,22 +31,6 @@ func (c CurrencyCode) isValid() (bool, bool) {
 	}
 	return true, false // currency code is valid, no default code set
 
-}
-
-// ValidateProductVariantQuery
-type ValidateProductVariantQuery struct {
-	ProductID string
-	VariantID string
-}
-
-// CatalogProductVariant
-type CatalogProductVariant struct {
-	ProductID   string
-	VariantID   string
-	ProductName string
-	VariantName string
-	UnitPrice   Money
-	Sellable    bool
 }
 
 // Money represents a monetary value in minor units.
@@ -89,6 +80,20 @@ type Basket struct {
 	UpdatedAt   time.Time
 }
 
+// Existing item checks if an item already exists in the basket.
+//
+// If the item exits it returns the BasketItem and true. Otherwise it returns
+// an empty BasketItem and false.
+func (b Basket) ExistingItem(productID, variantID string) (BasketItem, bool) {
+	for _, item := range b.BasketItems {
+		if item.ProductID == ProductID(productID) && item.VariantID == VariantID(variantID) {
+			return *item, true
+		}
+	}
+
+	return BasketItem{}, false
+}
+
 // BasketQuery represents filter options that maybe passed from
 // the grpc request to the service and then forwarded to the
 // repository layer to filter results.
@@ -102,4 +107,35 @@ type BasketQuery struct {
 	ProductID    string
 	VariantID    string
 	Quantity     int
+}
+
+type existingBasketItem struct {
+	ID       string
+	Quantity int32
+}
+
+type AddValidatedItemCommand struct {
+	BasketID            string
+	ProductID           string
+	VariantID           string
+	ProductNameSnapShot string
+	VariantNameSnapShot string
+	Quantity            int32
+	UnitPrice           Money
+}
+
+// CatalogProductVariant
+type CatalogProductVariant struct {
+	ProductID   string
+	VariantID   string
+	ProductName string
+	VariantName string
+	UnitPrice   Money
+	Sellable    bool
+}
+
+// ValidateProductVariantQuery
+type ValidateProductVariantQuery struct {
+	ProductID string
+	VariantID string
 }

@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 // Repository defines Basket Service persistence behaviour.
 type Repository interface {
 	CreateBasket(ctx context.Context, basket Basket) (Basket, error)
 	GetBasket(ctx context.Context, basketID string) (Basket, error)
-	AddItem(ctx context.Context, query BasketQuery) (Basket, error)
+	AddItem(ctx context.Context, cmd AddValidatedItemCommand) (Basket, error)
 	UpdateItemQuantity(ctx context.Context, query BasketQuery) (Basket, error)
 	RemoveItem(ctx context.Context, query BasketQuery) (Basket, error)
 	ClearBasket(ctx context.Context, query BasketQuery) (Basket, error)
@@ -168,8 +171,30 @@ func (r *MySQLRepository) GetBasket(ctx context.Context, basketID string) (Baske
 	return basket, nil
 }
 
-// AddItem
-func (r *MySQLRepository) AddItem(ctx context.Context, query BasketQuery) (Basket, error) {
+// AddItem adds a basket item to an existing basket.
+//
+// If successful it returns the updated basket and a nil error. If it fails it
+// returns an empty basket and an error.
+func (r *MySQLRepository) AddItem(ctx context.Context, cmd AddValidatedItemCommand) (Basket, error) {
+	for attempt := 1; attempt <= maxIDGenerationAttempts; attempt++ {
+		updatedBasket, err := r.addItemOnce(ctx, cmd)
+		if err == nil {
+			return updatedBasket, nil
+		}
+
+		if errors.Is(err, ErrCouldNotAllocateItemID) {
+			r.logger.WarnContext(ctx, "basket item id collision detedted; retrying",
+				"basket_id", cmd.BasketID,
+				"product_id", cmd.ProductID,
+				"variant_id", cmd.VariantID,
+				"attempt", attempt,
+			)
+
+			continue
+		}
+
+		return Basket{}, err
+	}
 
 	return Basket{}, nil
 }
@@ -190,6 +215,396 @@ func (r *MySQLRepository) RemoveItem(ctx context.Context, query BasketQuery) (Ba
 func (r *MySQLRepository) ClearBasket(ctx context.Context, query BasketQuery) (Basket, error) {
 
 	return Basket{}, nil
+}
+
+func (r *MySQLRepository) addItemOnce(ctx context.Context, cmd AddValidatedItemCommand) (Basket, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to begin add item transaction",
+			"error", err,
+			"basked_id", cmd.BasketID,
+		)
+
+		return Basket{}, fmt.Errorf("begin add item transaction: %w", err)
+	}
+
+	commited := false
+	defer func() {
+		if commited {
+			return
+		}
+
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			r.logger.ErrorContext(ctx, "failed to roll back add item transaction",
+				"error", rollbackErr,
+				"basket_id", cmd.BasketID,
+			)
+		}
+	}()
+
+	basketCurrencyCode, err := r.lockBasketForUpdate(ctx, tx, cmd.BasketID)
+	if err != nil {
+		return Basket{}, err
+	}
+
+	if basketCurrencyCode != CurrencyCode(cmd.UnitPrice.CurrencyCode) {
+		r.logger.ErrorContext(ctx, "basket currency mismatch",
+			"error", ErrBasketCurrencyMismatch,
+			"basket_id", cmd.BasketID,
+			"db_basket_currency_code", basketCurrencyCode,
+			"basket_currency_code", cmd.UnitPrice.CurrencyCode,
+		)
+
+		return Basket{}, ErrBasketCurrencyMismatch
+	}
+
+	existingItem, found, err := r.findBasketItemForUpdate(ctx, tx, cmd)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "basket currency mismatch",
+			"error", ErrBasketCurrencyMismatch,
+			"basket_id", cmd.BasketID,
+			"db_basket_currency_code", basketCurrencyCode,
+			"basket_currency_code", cmd.UnitPrice.CurrencyCode,
+		)
+
+		return Basket{}, err
+	}
+
+	if found {
+		if err := r.updateExistingBasketItem(ctx, tx, cmd, existingItem); err != nil {
+			return Basket{}, err
+		}
+
+		if err := r.insertNewBasketItem(ctx, tx, cmd); err != nil {
+			return Basket{}, err
+		}
+	}
+
+	if err := r.touchBasket(ctx, tx, cmd.BasketID); err != nil {
+		return Basket{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.logger.ErrorContext(ctx, "failed to commit add item transaction",
+			"error", err,
+			"basket_id", cmd.BasketID,
+			"product_id", cmd.ProductID,
+			"variant_id", cmd.VariantID,
+		)
+
+		return Basket{}, fmt.Errorf("commit add item transaction: %w", err)
+	}
+
+	commited = true
+
+	r.logger.DebugContext(ctx, "add item transaction committed",
+		"basket_id", cmd.BasketID,
+		"product_id", cmd.ProductID,
+		"variant_id", cmd.VariantID,
+		"quantity", cmd.Quantity,
+	)
+
+	updatedBasket, err := r.GetBasket(ctx, cmd.BasketID)
+	if err != nil {
+		return Basket{}, fmt.Errorf("load basket after add item: %w", err)
+	}
+
+	return updatedBasket, nil
+}
+
+func (r *MySQLRepository) insertNewBasketItem(
+	ctx context.Context,
+	tx *sql.Tx,
+	cmd AddValidatedItemCommand,
+) error {
+	basketItemID, err := NewBasketID()
+	if err != nil {
+		r.logger.ErrorContext(ctx, "generate basket item id err",
+			"error", err,
+			"basket_id", cmd.BasketID,
+		)
+		return fmt.Errorf("generate basket item id: %w", err)
+	}
+
+	lineTotalMinorUnits := int64(cmd.Quantity) * cmd.UnitPrice.AmountMinor
+
+	const insertNewItemQuery = `
+		INSERT INTO basket_items(
+			basket_item_id,
+			basket_id,
+			product_id,
+			variant_id,
+			product_name_snapshot,
+			variant_name_snapshot,
+			quantity,
+			unit_price_minor_units,
+			line_total_minor_units,
+			currency_code
+		)
+		VALUES (?,?,?,?,?,?,?,?,?,?)
+	`
+
+	args := []any{
+		basketItemID,
+		cmd.BasketID,
+		cmd.ProductID,
+		cmd.VariantID,
+		cmd.ProductNameSnapShot,
+		cmd.VariantNameSnapShot,
+		cmd.Quantity,
+		cmd.UnitPrice.AmountMinor,
+		lineTotalMinorUnits,
+		cmd.UnitPrice.CurrencyCode,
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		insertNewItemQuery,
+		args...,
+	)
+	if err != nil {
+		if isDuplicateKey(err, "uk_basket_items_basket_item_id") {
+			return ErrCouldNotAllocateItemID
+		}
+
+		r.logger.ErrorContext(ctx, "failed to insert basket item",
+			"error", err,
+			"basket_id", cmd.BasketID,
+			"basket_item_id", basketItemID,
+			"product_id", cmd.ProductID,
+			"variant_id", cmd.VariantID,
+		)
+
+		return fmt.Errorf("insert basket item: %w", err)
+	}
+
+	r.logger.DebugContext(ctx, "basket item inserted",
+		"basket_id", cmd.BasketID,
+		"basket_item_id", basketItemID,
+		"product_id", cmd.ProductID,
+		"variant_id", cmd.VariantID,
+		"quantity", cmd.Quantity,
+	)
+
+	return nil
+}
+
+func (r *MySQLRepository) updateExistingBasketItem(
+	ctx context.Context,
+	tx *sql.Tx,
+	cmd AddValidatedItemCommand,
+	existingItem existingBasketItem,
+) error {
+	newQuantity := existingItem.Quantity + cmd.Quantity
+	if newQuantity < minBasketQuantity || newQuantity > maxBasketQuantity {
+		return ErrInvalidQuantity
+	}
+
+	lineTotalMinorUnits := int64(newQuantity) * cmd.UnitPrice.AmountMinor
+
+	const query = `
+		UPDATE basket_items
+		SET
+			product_name_snapshot = ?,
+			variant_name_snapshot = ?,
+			quantity = ?,
+			unit_price_minor_units = ?,
+			line_total_minor_units = ?,
+			currency_code = ?,
+			updated_at = CURRRENT_TIMESTAMP(6)
+		WHERE basket_item_id = ?
+	`
+
+	args := []any{
+		cmd.ProductNameSnapShot,
+		cmd.VariantNameSnapShot,
+		cmd.Quantity,
+		cmd.UnitPrice.AmountMinor,
+		lineTotalMinorUnits,
+		cmd.UnitPrice.CurrencyCode,
+		cmd.BasketID,
+	}
+
+	result, err := tx.ExecContext(
+		ctx,
+		query,
+		args...,
+	)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to update existing basket item",
+			"error", err,
+			"basket_id", cmd.BasketID,
+			"basket_item_id", existingItem.ID,
+			"product_id", cmd.ProductID,
+			"variant_id", cmd.VariantID,
+		)
+
+		return fmt.Errorf("update existing basket item: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read basket item update rows affected: %w", err)
+	}
+
+	if rowsAffected != 1 {
+		return fmt.Errorf("update existing basket items; expected 1 row affected, go %d", rowsAffected)
+	}
+
+	r.logger.DebugContext(ctx, "existing basket item quantity increased",
+		"basket_id", cmd.BasketID,
+		"basket_item_id", existingItem.ID,
+		"product_id", cmd.ProductID,
+		"variant_id", cmd.VariantID,
+		"added_quantity", cmd.Quantity,
+		"new_quantity", newQuantity,
+	)
+
+	return nil
+}
+
+func (r *MySQLRepository) touchBasket(
+	ctx context.Context,
+	tx *sql.Tx,
+	basketID string,
+) error {
+	const query = `
+		UPDATE baskets
+		SET updated_at = CURRENT_TIMESTAMP(6)
+		WHERE basket_id = ?
+	`
+
+	result, err := tx.ExecContext(ctx, query, basketID)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to touch basket update_at",
+			"error", err,
+			"basket_id", basketID,
+		)
+
+		return fmt.Errorf("touch basket update_at: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read touch basket rows affected: %w", err)
+	}
+
+	if rowsAffected != 1 {
+		return fmt.Errorf("touch basket: expected 1 row affected, got %d", rowsAffected)
+	}
+
+	return nil
+}
+
+func isDuplicateKey(err error, keyName string) bool {
+	var mysqlErr *mysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+
+	if mysqlErr.Number != 1062 { // mysql Error 1062: Duplicate entry
+		return false
+	}
+
+	return strings.Contains(mysqlErr.Message, keyName)
+}
+
+func (r *MySQLRepository) findBasketItemForUpdate(ctx context.Context, tx *sql.Tx, cmd AddValidatedItemCommand) (
+	existingBasketItem,
+	bool,
+	error) {
+	const query = `
+			SELECT
+				basket_item_id,
+				quantity
+			FROM basket_items
+			WHERE basket_id = ?
+				AND product_id = ?
+				AND variant_id = ?
+			FOR UPDATE
+		`
+	var item existingBasketItem
+
+	args := []any{cmd.BasketID, cmd.ProductID, cmd.VariantID}
+
+	err := tx.QueryRowContext(
+		ctx,
+		query,
+		args...,
+	).Scan(
+		&item.ID,
+		&item.Quantity,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return existingBasketItem{}, false, nil
+		}
+
+		r.logger.ErrorContext(ctx, "failed to find basket item for update",
+			"error", err,
+			"basked_id", cmd.BasketID,
+			"product_id", cmd.ProductID,
+			"variant_id", cmd.VariantID,
+		)
+
+		return existingBasketItem{}, false, fmt.Errorf("find basket item for update: %w", err)
+	}
+
+	return item, true, nil
+}
+
+func (r *MySQLRepository) lockBasketForUpdate(ctx context.Context, tx *sql.Tx, basketID string) (
+	CurrencyCode, error) {
+	const query = `
+			SELECT
+				status,
+				currency_code
+			FROM baskets
+			WHERE basket_id = ?
+			FOR UPDATE
+		`
+
+	var status string
+	var currencyCode string
+
+	err := tx.QueryRowContext(ctx, query, basketID).Scan(
+		&status,
+		&currencyCode,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			r.logger.ErrorContext(ctx, "failed to lock basket for add item: basket not found.",
+				"error", err,
+				"basket_id", basketID,
+			)
+
+			return CurrencyCode(""), ErrBasketNotFound
+		}
+
+		r.logger.ErrorContext(ctx, "failed to lock basket for add item",
+			"error", err,
+			"basket_id", basketID,
+		)
+
+		return CurrencyCode(""), fmt.Errorf("lock basket for add item item: %w", err)
+	}
+
+	if BasketStatus(status) != BasketStatusActive {
+		r.logger.ErrorContext(ctx, "failed to lock basket for add item",
+			"error", err,
+			"basket_id", basketID,
+		)
+		return CurrencyCode(""), ErrBasketNotModifiable
+	}
+
+	r.logger.InfoContext(ctx, "locked basket for add item",
+		"basket_id", basketID,
+		"status", status,
+		"currency_code", currencyCode,
+	)
+
+	return CurrencyCode(currencyCode), nil
+
 }
 
 func (r *MySQLRepository) getBasketRow(ctx context.Context, basketID string) (Basket, error) {

@@ -34,6 +34,9 @@ func mapServiceError(err error) error {
 	case errors.Is(err, basket.ErrProductVariantMismatch):
 		return status.Error(codes.FailedPrecondition, "product and variant mismatch")
 
+	case errors.Is(err, basket.ErrBasketCurrencyMismatch):
+		return status.Error(codes.FailedPrecondition, "basket currency does not match catalog item currency")
+
 	case errors.Is(err, basket.ErrBasketNotModifiable):
 		return status.Error(codes.FailedPrecondition, "basket not modifiable")
 

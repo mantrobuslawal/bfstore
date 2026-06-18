@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-const (
-	minBasketQuantity = 1
-	maxBasketQuantity = 99
-)
-
 type CatalogClient interface {
 	ValidateProductVariant(ctx context.Context, query ValidateProductVariantQuery) (CatalogProductVariant, error)
 }
@@ -201,11 +196,14 @@ func (s *Service) AddItem(ctx context.Context, query BasketQuery) (Basket, error
 		return Basket{}, ErrProductNotSellable
 	}
 
-	updatedBasket, err := s.repository.AddItem(ctx, BasketQuery{
-		BasketID:  query.BasketID,
-		ProductID: query.ProductID,
-		VariantID: query.VariantID,
-		Quantity:  query.Quantity,
+	updatedBasket, err := s.repository.AddItem(ctx, AddValidatedItemCommand{
+		BasketID:            query.BasketID,
+		ProductID:           catalogItem.ProductID,
+		VariantID:           catalogItem.VariantID,
+		ProductNameSnapShot: catalogItem.ProductName,
+		VariantNameSnapShot: catalogItem.VariantName,
+		Quantity:            int32(query.Quantity),
+		UnitPrice:           catalogItem.UnitPrice,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to add item to basket",
