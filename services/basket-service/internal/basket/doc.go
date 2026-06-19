@@ -34,5 +34,4 @@
 //
 //	Basket state is customer intent.
 //	Order state is commercial history.
-//
 package basket
