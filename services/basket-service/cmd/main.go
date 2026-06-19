@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	catalogv1 "github.com/mantrobuslawal/bfstore/gen/go/bfstore/catalog/v1"
 	"github.com/mantrobuslawal/bfstore/pkg/platform/dbmetrics"
 	"github.com/mantrobuslawal/bfstore/pkg/platform/healthcheck"
 	"github.com/mantrobuslawal/bfstore/pkg/platform/telemetry"
@@ -93,11 +94,34 @@ func main() {
 		cfg.CatalogGRPCAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
+	if err != nil {
+		logger.Error("failed to create catalog grpc client",
+			"error", err,
+			"catalog_grpc_address", cfg.CatalogGRPCAddress,
+		)
+		os.Exit(1)
+	}
+	defer catalogConn.Close()
 
-	// TODO: ADD GRPC CLIENT FOR CATALOG SERVICE
-	service := basket.NewService(repository, logger)
+	catalogClient := basket.NewCatalogGRPCClient(
+		catalogv1.NewCatalogServiceClient(catalogConn),
+		logger.With(
+			"service", "basket-service",
+			"component", "catalog_grpc_client",
+		),
+		cfg.CatalogRequestTimeout,
+	)
 
-	grpcServer, err := basketgrpc.NewServer(service, logger)
+	basketService := basket.NewService(
+		repository,
+		*catalogClient,
+		logger.With(
+			"service", "basket-service",
+			"component", "catalog_grpc_client",
+		),
+	)
+
+	grpcServer, err := basketgrpc.NewServer(basketService, logger)
 	if err != nil {
 		logger.Error("failed to setup requestmetrics interceptor", "error", err)
 		os.Exit(1)

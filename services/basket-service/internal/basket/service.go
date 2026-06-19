@@ -8,19 +8,15 @@ import (
 	"strings"
 )
 
-type CatalogClient interface {
-	ValidateProductVariant(ctx context.Context, query ValidateProductVariantQuery) (CatalogProductVariant, error)
-}
-
 // Service contains Basket business logic.
 type Service struct {
 	repository    Repository
-	catalogClient CatalogClient
+	catalogClient CatalogGRPCClient
 	logger        *slog.Logger
 }
 
 // NewService creates a Basket Service
-func NewService(repository Repository, catalogClient CatalogClient, logger *slog.Logger) *Service {
+func NewService(repository Repository, catalogClient CatalogGRPCClient, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
