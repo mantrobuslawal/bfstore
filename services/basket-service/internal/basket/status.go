@@ -5,27 +5,22 @@ import "strings"
 type BasketStatus string
 
 const (
-	BasketStatusDraft      = "draft"
-	BasketStatusActive     = "active"
-	BasketStatusCleared    = "cleared"
-	BasketStatusExpired    = "expired"
-	BasketStatusCheckedOut = "checked_out"
+	BasketStatusActive     BasketStatus = "ACTIVE"
+	BasketStatusCleared    BasketStatus = "CLEARED"
+	BasketStatusExpired    BasketStatus = "EXPIRED"
+	BasketStatusCheckedOut BasketStatus = "CHECKED_OUT"
 )
 
 func ParseToBasketStatus(status string) (BasketStatus, error) {
-	status = strings.TrimSpace(status)
-	switch status {
-	case "draft":
-		return BasketStatusDraft, nil
-	case "active":
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case string(BasketStatusActive):
 		return BasketStatusActive, nil
-	case "cleared":
+	case string(BasketStatusCleared):
 		return BasketStatusCleared, nil
-	case "expired":
+	case string(BasketStatusExpired):
 		return BasketStatusExpired, nil
-	case "check_out":
+	case string(BasketStatusCheckedOut):
 		return BasketStatusCheckedOut, nil
-
 	default:
 		return "", ErrInvalidBasketStatus
 	}
