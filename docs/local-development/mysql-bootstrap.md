@@ -1,182 +1,189 @@
 # Local MySQL Bootstrap
 
-This document explains how local MySQL is bootstrapped for bfstore.
-
-## Goal
-
-A developer should be able to rebuild local MySQL from a fresh Docker volume without manually logging into the MySQL container.
-
-Target command:
-
-```bash
-make local-db-fresh
-```
+This document explains how local MySQL is bootstrapped for bfstore service-owned
+databases.
 
 ## Bootstrap files
 
-Recommended path:
+Local bootstrap SQL lives in:
 
 ```text
 deploy/local/mysql/init/
+├── 001-create-service-databases.sql
+└── 002-create-service-users.sql
 ```
 
-Files:
+Docker Compose mounts this directory into the MySQL container for first-time
+initialisation.
 
-```text
-001-create-service-databases.sql
-002-create-service-users.sql
-```
+## Service-owned databases
 
-These files are mounted to:
-
-```text
-/docker-entrypoint-initdb.d
-```
-
-inside the MySQL container.
-
-## What bootstrap creates
-
-The bootstrap creates service-owned databases:
+The local bootstrap should create service databases such as:
 
 ```text
 bfstore_catalog
 bfstore_basket
+```
+
+Future service databases may include:
+
+```text
 bfstore_inventory
 bfstore_order
 bfstore_payment
+bfstore_shipping
+bfstore_notification
 ```
 
-It also creates service users:
+## Local service users
+
+The local bootstrap should create users such as:
 
 ```text
 bfstore_catalog
 bfstore_basket
-bfstore_inventory
-bfstore_order
-bfstore_payment
 ```
 
-Each user only gets access to its own database.
+For the current local developer workflow, these users can be used by
+`golang-migrate`.
 
-## What bootstrap does not create
-
-Bootstrap should not create long-term service tables such as:
+Longer term, split local and cloud permissions into:
 
 ```text
-products
-variants
-baskets
-basket_items
-orders
-payments
+root/bootstrap user
+migrator user
+runtime app user
 ```
 
-Those belong in service migrations.
+Example future direction:
 
-## Why init scripts sometimes appear not to run
+```text
+bfstore_catalog_migrator -> schema changes
+bfstore_catalog_app      -> SELECT, INSERT, UPDATE, DELETE only
 
-MySQL init scripts only run when the MySQL data directory is first initialised.
+bfstore_basket_migrator  -> schema changes
+bfstore_basket_app       -> SELECT, INSERT, UPDATE, DELETE only
+```
 
-If the Docker volume already exists, the scripts are skipped.
+## Local Makefile flow
 
-This will not rerun init scripts:
+Start MySQL only:
 
 ```bash
-docker compose restart mysql
+make local-db-up
 ```
 
-This should rebuild from scratch when wired correctly:
+Wait for authenticated root queries:
+
+```bash
+make local-db-wait
+```
+
+Bootstrap databases and users:
+
+```bash
+make local-db-bootstrap
+```
+
+Check catalog user:
+
+```bash
+make local-db-check-catalog-user
+```
+
+Check basket user:
+
+```bash
+make local-db-check-basket-user
+```
+
+## Catalog migration flow
+
+```bash
+make catalog-db-migrate-up
+make catalog-db-migrate-version
+```
+
+Rollback one migration:
+
+```bash
+make catalog-db-migrate-down
+```
+
+Fresh local catalog database flow:
+
+```bash
+make local-db-fresh-catalog
+```
+
+## Basket migration flow
+
+```bash
+make basket-db-migrate-up
+make basket-db-migrate-version
+```
+
+Rollback one migration:
+
+```bash
+make basket-db-migrate-down
+```
+
+Fresh local basket database flow:
+
+```bash
+make local-db-fresh-basket
+```
+
+## Full local rebuild flow
+
+For a full local reset:
 
 ```bash
 make local-db-fresh
 ```
 
-## Docker Compose mount
-
-The MySQL service should include:
-
-```yaml
-volumes:
-  - bfstore-mysql-data:/var/lib/mysql
-  - ./deploy/local/mysql/init:/docker-entrypoint-initdb.d:ro
-```
-
-## Local users and Docker networking
-
-Users are created as:
-
-```sql
-'bfstore_basket'@'%'
-```
-
-rather than:
-
-```sql
-'bfstore_basket'@'localhost'
-```
-
-because Docker-host connections may appear to MySQL as a bridge network IP rather than localhost.
-
-Access is still scoped:
-
-```sql
-GRANT ALL PRIVILEGES ON bfstore_basket.* TO 'bfstore_basket'@'%';
-```
-
-## Troubleshooting
-
-### Access denied for user
-
-Example:
+This should eventually:
 
 ```text
-Error 1045: Access denied for user 'bfstore_basket'@'172.22.0.1'
+remove the local MySQL volume
+start MySQL
+wait for authenticated root access
+run bootstrap SQL
+check service users
+run catalog migrations
+run basket migrations
+show migration versions
 ```
 
-Likely cause:
+## Important local development warning
 
-```text
-user was created only for localhost
-init scripts did not run
-old MySQL volume is still being reused
-wrong password in DATABASE_URL
-```
+MySQL only runs `/docker-entrypoint-initdb.d` scripts when the data directory is
+empty.
 
-Fix:
+If you change bootstrap SQL and still have an existing MySQL volume, the changes
+will not be replayed automatically.
+
+Use:
 
 ```bash
-make local-db-fresh
+make local-db-reset
 ```
 
-### Init files changed but database did not
-
-The old volume probably still exists.
-
-Run:
+or:
 
 ```bash
-make local-db-fresh
+docker compose -p bfstore -f docker-compose.yaml down -v
 ```
 
-### Wrong volume removed
-
-Compose volume names depend on the Compose project name.
-
-Check:
-
-```bash
-docker volume ls
-```
-
-Make sure `MYSQL_VOLUME` matches the actual MySQL data volume.
+for throwaway local rebuilds.
 
 ## Practical rule
 
-```text
-Bootstrap creates access.
-Migrations create schema.
-Seeds create local data.
-```
+Bootstrap creates databases and users.
 
-Keep it boring where production matters.
+Migrations create service schema objects.
+
+Seed files create demo data.
+
+Keep those three jobs separate.
