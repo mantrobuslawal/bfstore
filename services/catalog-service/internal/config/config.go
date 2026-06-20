@@ -48,7 +48,7 @@ func Load() (Config, error) {
 			Host:     getEnv("MYSQL_HOST", "localhost"),
 			Port:     getEnv("MYSQL_PORT", "3306"),
 			Name:     getEnv("MYSQL_DATABASE", "bfstore_catalog"),
-			User:     getEnv("MYSQL_USER", "bfstore_catalog_user"),
+			User:     getEnv("MYSQL_USER", "bfstore_catalog"),
 			Password: getEnv("MYSQL_PASSWORD", "bfstore_catalog_password"),
 		},
 		EnableGRPCReflection: loadBoolEnv("GRPC_REFLECTION_ENABLED", false),
