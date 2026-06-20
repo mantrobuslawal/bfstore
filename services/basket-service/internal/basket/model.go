@@ -6,31 +6,31 @@ import (
 )
 
 const (
-	minBasketQuantity = 1
-	maxBasketQuantity = 99
-
+	minBasketQuantity       = 1
+	maxBasketQuantity       = 99
 	maxIDGenerationAttempts = 3
 )
 
-// CurrencyCode represents an ISO 4217 Currency Code.
+// CurrencyCode represents an ISO 4217 currency code.
 type CurrencyCode string
 
-const (
-	defaultCurrencyCode = "gbp"
-)
+const defaultCurrencyCode CurrencyCode = "GBP"
 
-func (c CurrencyCode) isValid() (bool, bool) {
-	normalisedCurrency := strings.TrimSpace(strings.ToLower(string(c)))
-
-	if normalisedCurrency == "" {
-		c = "GBP"
-		return true, true // currency code is valid and default code was set
+// NormaliseCurrencyCode validates and normalises a currency code.
+//
+// The first bfstore basket slice supports GBP only.
+// Empty currency defaults to GBP.
+func NormaliseCurrencyCode(code string) (CurrencyCode, bool, error) {
+	normalised := strings.ToUpper(strings.TrimSpace(code))
+	if normalised == "" {
+		return defaultCurrencyCode, true, nil
 	}
-	if normalisedCurrency != defaultCurrencyCode { // Store only handles GBP currently.
-		return false, false // currency code is invalid, no default code set
-	}
-	return true, false // currency code is valid, no default code set
 
+	if normalised != string(defaultCurrencyCode) {
+		return "", false, ErrInvalidCurrencyCode
+	}
+
+	return CurrencyCode(normalised), false, nil
 }
 
 // Money represents a monetary value in minor units.
@@ -44,7 +44,7 @@ type Money struct {
 // BasketID represents a basket identifier.
 type BasketID string
 
-// BasketItemID represents a basket identifier.
+// BasketItemID represents a basket item identifier.
 type BasketItemID string
 
 // ProductID represents a catalog product identifier.
@@ -53,21 +53,22 @@ type ProductID string
 // VariantID represents the identifier of a catalog product variant.
 type VariantID string
 
-// BasketItem represents an unique basket line item e.g. a unique product type
-// in the basket.
+// BasketItem represents a unique basket line item.
 type BasketItem struct {
-	BasketItemID        BasketItemID
-	BasketID            BasketID
-	ProductID           ProductID
-	VariantID           VariantID
-	ProductNameSnapShot string
-	VariantNameSnapShot string
-	Quantity            int
-	UnitPrice           Money
-	LineTotal           Money
-	CurrencyCode        CurrencyCode
-	AddedAt             time.Time
-	UpdatedAt           time.Time
+	BasketItemID BasketItemID
+	BasketID     BasketID
+	ProductID    ProductID
+	VariantID    VariantID
+
+	ProductNameSnapshot string
+	VariantNameSnapshot string
+
+	Quantity  int
+	UnitPrice Money
+	LineTotal Money
+
+	AddedAt   time.Time
+	UpdatedAt time.Time
 }
 
 // Basket represents a store shopping basket.
@@ -80,12 +81,16 @@ type Basket struct {
 	UpdatedAt   time.Time
 }
 
-// Existing item checks if an item already exists in the basket.
+// ExistingItem checks whether an item already exists in the basket.
 //
-// If the item exits it returns the BasketItem and true. Otherwise it returns
-// an empty BasketItem and false.
+// If the item exists, it returns the BasketItem and true.
+// Otherwise, it returns an empty BasketItem and false.
 func (b Basket) ExistingItem(productID, variantID string) (BasketItem, bool) {
 	for _, item := range b.BasketItems {
+		if item == nil {
+			continue
+		}
+
 		if item.ProductID == ProductID(productID) && item.VariantID == VariantID(variantID) {
 			return *item, true
 		}
@@ -94,12 +99,7 @@ func (b Basket) ExistingItem(productID, variantID string) (BasketItem, bool) {
 	return BasketItem{}, false
 }
 
-// BasketQuery represents filter options that maybe passed from
-// the grpc request to the service and then forwarded to the
-// repository layer to filter results.
-// Depending on the request some fields maybe empty.
-//
-// Accepts strings from gRPC layer and validates at Service layer.
+// BasketQuery represents input passed from gRPC handlers into the service layer.
 type BasketQuery struct {
 	CurrencyCode string
 	BasketID     string
@@ -109,22 +109,38 @@ type BasketQuery struct {
 	Quantity     int
 }
 
-type existingBasketItem struct {
-	ID       string
-	Quantity int32
-}
-
+// AddValidatedItemCommand is used once catalog-service has validated the
+// product/variant pair and returned a snapshot.
 type AddValidatedItemCommand struct {
 	BasketID            string
 	ProductID           string
 	VariantID           string
-	ProductNameSnapShot string
-	VariantNameSnapShot string
-	Quantity            int32
+	ProductNameSnapshot string
+	VariantNameSnapshot string
+	Quantity            int
 	UnitPrice           Money
 }
 
-// CatalogProductVariant
+// UpdateItemQuantityCommand requests a basket item quantity replacement.
+type UpdateItemQuantityCommand struct {
+	BasketID     string
+	BasketItemID string
+	Quantity     int
+}
+
+// RemoveItemCommand requests removal of a basket item.
+type RemoveItemCommand struct {
+	BasketID     string
+	BasketItemID string
+}
+
+// ClearBasketCommand requests removal of all basket items.
+type ClearBasketCommand struct {
+	BasketID string
+}
+
+// CatalogProductVariant is the basket-service view of a catalog-validated
+// product variant.
 type CatalogProductVariant struct {
 	ProductID   string
 	VariantID   string
@@ -134,14 +150,20 @@ type CatalogProductVariant struct {
 	Sellable    bool
 }
 
-// ValidateProductVariantQuery
+// ValidateProductVariantQuery identifies a product/variant pair to validate
+// against catalog-service.
 type ValidateProductVariantQuery struct {
 	ProductID string
 	VariantID string
 }
 
+type existingBasketItem struct {
+	ID       string
+	Quantity int
+}
+
 type lockedBasketItem struct {
 	ID                  string
 	UnitPriceMinorUnits int64
-	CurrencyCode        string
+	CurrencyCode        CurrencyCode
 }
