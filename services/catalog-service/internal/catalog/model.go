@@ -1,6 +1,17 @@
 package catalog
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrInvalidVariantID              = errors.New("invalid variant id")
+	ErrProductVariantNotFound        = errors.New("product variant not found")
+	ErrProductVariantProductMismatch = errors.New("product variant does not belong to product")
+	ErrProductNotSellable            = errors.New("product is not sellable")
+	ErrProductVariantNotSellable     = errors.New("product variant is not sellable")
+)
 
 // Money represents a monetary value in minor units.
 //
@@ -89,8 +100,7 @@ type ProductVariant struct {
 	UpdatedAt   time.Time
 }
 
-// ProductAttributeDefinition defines an attribute that is
-// valid for a category
+// ProductAttributeDefinition defines an attribute that is valid for a category.
 type ProductAttributeDefinition struct {
 	AttributeID       AttributeID
 	CategoryID        CategoryID
@@ -107,8 +117,8 @@ type ProductAttributeDefinition struct {
 	CreatedAt         time.Time // used for pagination
 }
 
-// ProductAttributeOption represents a controlled allowed
-// value for an attribute definition.
+// ProductAttributeOption represents a controlled allowed value for an attribute
+// definition.
 type ProductAttributeOption struct {
 	OptionID     OptionID
 	Value        string
@@ -117,8 +127,8 @@ type ProductAttributeOption struct {
 	Status       ProductAttributeOptionStatus
 }
 
-// ProductAttributeValue represents a product-specific or
-// a variant-specific value for a defined attribute.
+// ProductAttributeValue represents a product-specific or a variant-specific
+// value for a defined attribute.
 type ProductAttributeValue struct {
 	ProductAttributeValueID ProductAttributeValueID
 	ProductID               ProductID
@@ -135,7 +145,7 @@ type ProductAttributeValue struct {
 	UpdatedAt time.Time
 }
 
-// ProductImage represents customer-facing catalogue imagery.
+// ProductImage represents customer-facing catalog imagery.
 type ProductImage struct {
 	ImageID      ImageID
 	ProductID    ProductID
@@ -145,6 +155,7 @@ type ProductImage struct {
 }
 
 // ProductDetails represents a fully hydrated version of a catalog product.
+//
 // This product view is provided when a call to GetProduct is made.
 type ProductDetails struct {
 	ProductID   ProductID
@@ -163,7 +174,9 @@ type ProductDetails struct {
 	Images     []*ProductImage
 }
 
-// ProductVariantDetails represents a fully hydrated version of a catalog product variant.
+// ProductVariantDetails represents a fully hydrated version of a catalog product
+// variant.
+//
 // This view is provided when a call to GetProduct is made.
 type ProductVariantDetails struct {
 	VariantID   VariantID
@@ -178,8 +191,8 @@ type ProductVariantDetails struct {
 	Attributes []*ProductAttributeValueDetails
 }
 
-// ProductAttributesValueDetails represents a fully hydrated version of a catalog product.
-// This product view is provided when a call to GetProduct is made.
+// ProductAttributeValueDetails represents a fully hydrated version of a product
+// or variant attribute value.
 type ProductAttributeValueDetails struct {
 	ProductAttributeValueID ProductAttributeValueID
 	ProductID               ProductID
@@ -201,6 +214,34 @@ type ProductAttributeValueDetails struct {
 	UpdatedAt time.Time
 }
 
+// ValidateProductVariantQuery identifies a product and variant pair that another
+// internal service wants to use.
+//
+// Basket Service uses this query when adding an item to a basket.
+type ValidateProductVariantQuery struct {
+	ProductID ProductID
+	VariantID VariantID
+}
+
+// ValidatedProductVariant is the small catalog-owned snapshot returned to
+// service-to-service callers such as Basket Service.
+//
+// Basket Service may store these values as a basket-line snapshot, but Catalog
+// Service remains the owner of product and variant truth. Order placement should
+// revalidate before payment.
+type ValidatedProductVariant struct {
+	ProductID   ProductID
+	VariantID   VariantID
+	ProductName string
+	VariantName string
+
+	ProductStatus ProductStatus
+	VariantStatus ProductVariantStatus
+
+	UnitPrice Money
+	Sellable  bool
+}
+
 // ListProductsFilter defines filter for product listing.
 type ListProductsFilter struct {
 	CategoryID      CategoryID
@@ -217,8 +258,8 @@ type ListCategoriesFilter struct {
 	PageToken        string
 }
 
-// ListProductAttributeDefinitionFilter defines filter for
-// product attribute definitions.
+// ListProductAttributeDefinitionsFilter defines filter for product attribute
+// definitions.
 type ListProductAttributeDefinitionsFilter struct {
 	// Required category ID.
 	CategoryID      CategoryID
