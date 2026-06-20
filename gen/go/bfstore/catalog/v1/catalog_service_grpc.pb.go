@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	CatalogService_ListProducts_FullMethodName                    = "/bfstore.catalog.v1.CatalogService/ListProducts"
 	CatalogService_GetProduct_FullMethodName                      = "/bfstore.catalog.v1.CatalogService/GetProduct"
+	CatalogService_ValidateProductVariant_FullMethodName          = "/bfstore.catalog.v1.CatalogService/ValidateProductVariant"
 	CatalogService_ListCategories_FullMethodName                  = "/bfstore.catalog.v1.CatalogService/ListCategories"
 	CatalogService_ListProductAttributeDefinitions_FullMethodName = "/bfstore.catalog.v1.CatalogService/ListProductAttributeDefinitions"
 )
@@ -29,9 +30,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// CatalogService provides customer-facing catalogue read APIs.
+// CatalogService provides customer-facing catalog read APIs and narrowly
+// scoped service-to-service validation APIs.
 //
-// Catalogue Service owns product truth.
+// Catalog Service owns product truth.
 // Search Service may later own denormalised browse/search projections.
 type CatalogServiceClient interface {
 	// ListProducts returns customer-visible products.
@@ -40,6 +42,15 @@ type CatalogServiceClient interface {
 	ListProducts(ctx context.Context, in *ListProductsRequest, opts ...grpc.CallOption) (*ListProductsResponse, error)
 	// GetProduct returns a single customer-visible product by ID.
 	GetProduct(ctx context.Context, in *GetProductRequest, opts ...grpc.CallOption) (*GetProductResponse, error)
+	// ValidateProductVariant validates that a product and variant pairing exists
+	// and is currently sellable.
+	//
+	// Basket Service uses this endpoint when adding an item to a basket so it can
+	// store a product/variant snapshot without owning catalog truth.
+	//
+	// Order Service should still revalidate product, variant, price, and stock
+	// before committing an order.
+	ValidateProductVariant(ctx context.Context, in *ValidateProductVariantRequest, opts ...grpc.CallOption) (*ValidateProductVariantResponse, error)
 	// ListCategories returns customer-visible product categories.
 	ListCategories(ctx context.Context, in *ListCategoriesRequest, opts ...grpc.CallOption) (*ListCategoriesResponse, error)
 	// ListProductAttributeDefinitions returns category-scoped attribute
@@ -78,6 +89,16 @@ func (c *catalogServiceClient) GetProduct(ctx context.Context, in *GetProductReq
 	return out, nil
 }
 
+func (c *catalogServiceClient) ValidateProductVariant(ctx context.Context, in *ValidateProductVariantRequest, opts ...grpc.CallOption) (*ValidateProductVariantResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateProductVariantResponse)
+	err := c.cc.Invoke(ctx, CatalogService_ValidateProductVariant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *catalogServiceClient) ListCategories(ctx context.Context, in *ListCategoriesRequest, opts ...grpc.CallOption) (*ListCategoriesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListCategoriesResponse)
@@ -102,9 +123,10 @@ func (c *catalogServiceClient) ListProductAttributeDefinitions(ctx context.Conte
 // All implementations must embed UnimplementedCatalogServiceServer
 // for forward compatibility.
 //
-// CatalogService provides customer-facing catalogue read APIs.
+// CatalogService provides customer-facing catalog read APIs and narrowly
+// scoped service-to-service validation APIs.
 //
-// Catalogue Service owns product truth.
+// Catalog Service owns product truth.
 // Search Service may later own denormalised browse/search projections.
 type CatalogServiceServer interface {
 	// ListProducts returns customer-visible products.
@@ -113,6 +135,15 @@ type CatalogServiceServer interface {
 	ListProducts(context.Context, *ListProductsRequest) (*ListProductsResponse, error)
 	// GetProduct returns a single customer-visible product by ID.
 	GetProduct(context.Context, *GetProductRequest) (*GetProductResponse, error)
+	// ValidateProductVariant validates that a product and variant pairing exists
+	// and is currently sellable.
+	//
+	// Basket Service uses this endpoint when adding an item to a basket so it can
+	// store a product/variant snapshot without owning catalog truth.
+	//
+	// Order Service should still revalidate product, variant, price, and stock
+	// before committing an order.
+	ValidateProductVariant(context.Context, *ValidateProductVariantRequest) (*ValidateProductVariantResponse, error)
 	// ListCategories returns customer-visible product categories.
 	ListCategories(context.Context, *ListCategoriesRequest) (*ListCategoriesResponse, error)
 	// ListProductAttributeDefinitions returns category-scoped attribute
@@ -136,6 +167,9 @@ func (UnimplementedCatalogServiceServer) ListProducts(context.Context, *ListProd
 }
 func (UnimplementedCatalogServiceServer) GetProduct(context.Context, *GetProductRequest) (*GetProductResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProduct not implemented")
+}
+func (UnimplementedCatalogServiceServer) ValidateProductVariant(context.Context, *ValidateProductVariantRequest) (*ValidateProductVariantResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ValidateProductVariant not implemented")
 }
 func (UnimplementedCatalogServiceServer) ListCategories(context.Context, *ListCategoriesRequest) (*ListCategoriesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListCategories not implemented")
@@ -200,6 +234,24 @@ func _CatalogService_GetProduct_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CatalogService_ValidateProductVariant_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateProductVariantRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CatalogServiceServer).ValidateProductVariant(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CatalogService_ValidateProductVariant_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CatalogServiceServer).ValidateProductVariant(ctx, req.(*ValidateProductVariantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _CatalogService_ListCategories_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListCategoriesRequest)
 	if err := dec(in); err != nil {
@@ -250,6 +302,10 @@ var CatalogService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProduct",
 			Handler:    _CatalogService_GetProduct_Handler,
+		},
+		{
+			MethodName: "ValidateProductVariant",
+			Handler:    _CatalogService_ValidateProductVariant_Handler,
 		},
 		{
 			MethodName: "ListCategories",

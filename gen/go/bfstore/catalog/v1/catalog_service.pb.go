@@ -229,6 +229,159 @@ func (x *GetProductResponse) GetProduct() *Product {
 	return nil
 }
 
+// ValidateProductVariantRequest identifies the product and variant that another
+// service wants to use.
+//
+// The Catalog Service must confirm that:
+// - the product exists
+// - the variant exists
+// - the variant belongs to the product
+// - the product and variant are sellable
+type ValidateProductVariantRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProductId     string                 `protobuf:"bytes,1,opt,name=product_id,json=productId,proto3" json:"product_id,omitempty"`
+	VariantId     string                 `protobuf:"bytes,2,opt,name=variant_id,json=variantId,proto3" json:"variant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateProductVariantRequest) Reset() {
+	*x = ValidateProductVariantRequest{}
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateProductVariantRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateProductVariantRequest) ProtoMessage() {}
+
+func (x *ValidateProductVariantRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateProductVariantRequest.ProtoReflect.Descriptor instead.
+func (*ValidateProductVariantRequest) Descriptor() ([]byte, []int) {
+	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ValidateProductVariantRequest) GetProductId() string {
+	if x != nil {
+		return x.ProductId
+	}
+	return ""
+}
+
+func (x *ValidateProductVariantRequest) GetVariantId() string {
+	if x != nil {
+		return x.VariantId
+	}
+	return ""
+}
+
+// ValidateProductVariantResponse returns a small authoritative snapshot that
+// Basket Service can store against a basket item.
+//
+// This response is intentionally smaller than Product because basket-service
+// only needs enough information to show the basket and calculate line totals.
+// The snapshot is not final order truth; checkout/order placement should
+// revalidate before payment.
+type ValidateProductVariantResponse struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	ProductId   string                 `protobuf:"bytes,1,opt,name=product_id,json=productId,proto3" json:"product_id,omitempty"`
+	VariantId   string                 `protobuf:"bytes,2,opt,name=variant_id,json=variantId,proto3" json:"variant_id,omitempty"`
+	ProductName string                 `protobuf:"bytes,3,opt,name=product_name,json=productName,proto3" json:"product_name,omitempty"`
+	VariantName string                 `protobuf:"bytes,4,opt,name=variant_name,json=variantName,proto3" json:"variant_name,omitempty"`
+	UnitPrice   *v1.Money              `protobuf:"bytes,5,opt,name=unit_price,json=unitPrice,proto3" json:"unit_price,omitempty"`
+	// True when the product and variant are currently allowed to be added to a
+	// basket.
+	Sellable      bool `protobuf:"varint,6,opt,name=sellable,proto3" json:"sellable,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateProductVariantResponse) Reset() {
+	*x = ValidateProductVariantResponse{}
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateProductVariantResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateProductVariantResponse) ProtoMessage() {}
+
+func (x *ValidateProductVariantResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateProductVariantResponse.ProtoReflect.Descriptor instead.
+func (*ValidateProductVariantResponse) Descriptor() ([]byte, []int) {
+	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ValidateProductVariantResponse) GetProductId() string {
+	if x != nil {
+		return x.ProductId
+	}
+	return ""
+}
+
+func (x *ValidateProductVariantResponse) GetVariantId() string {
+	if x != nil {
+		return x.VariantId
+	}
+	return ""
+}
+
+func (x *ValidateProductVariantResponse) GetProductName() string {
+	if x != nil {
+		return x.ProductName
+	}
+	return ""
+}
+
+func (x *ValidateProductVariantResponse) GetVariantName() string {
+	if x != nil {
+		return x.VariantName
+	}
+	return ""
+}
+
+func (x *ValidateProductVariantResponse) GetUnitPrice() *v1.Money {
+	if x != nil {
+		return x.UnitPrice
+	}
+	return nil
+}
+
+func (x *ValidateProductVariantResponse) GetSellable() bool {
+	if x != nil {
+		return x.Sellable
+	}
+	return false
+}
+
 type ListCategoriesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Page  *v1.PageRequest        `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
@@ -243,7 +396,7 @@ type ListCategoriesRequest struct {
 
 func (x *ListCategoriesRequest) Reset() {
 	*x = ListCategoriesRequest{}
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[4]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +408,7 @@ func (x *ListCategoriesRequest) String() string {
 func (*ListCategoriesRequest) ProtoMessage() {}
 
 func (x *ListCategoriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[4]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +421,7 @@ func (x *ListCategoriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCategoriesRequest.ProtoReflect.Descriptor instead.
 func (*ListCategoriesRequest) Descriptor() ([]byte, []int) {
-	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{4}
+	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListCategoriesRequest) GetPage() *v1.PageRequest {
@@ -302,7 +455,7 @@ type ListCategoriesResponse struct {
 
 func (x *ListCategoriesResponse) Reset() {
 	*x = ListCategoriesResponse{}
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[5]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -314,7 +467,7 @@ func (x *ListCategoriesResponse) String() string {
 func (*ListCategoriesResponse) ProtoMessage() {}
 
 func (x *ListCategoriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[5]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -327,7 +480,7 @@ func (x *ListCategoriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCategoriesResponse.ProtoReflect.Descriptor instead.
 func (*ListCategoriesResponse) Descriptor() ([]byte, []int) {
-	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{5}
+	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListCategoriesResponse) GetCategories() []*Category {
@@ -360,7 +513,7 @@ type ListProductAttributeDefinitionsRequest struct {
 
 func (x *ListProductAttributeDefinitionsRequest) Reset() {
 	*x = ListProductAttributeDefinitionsRequest{}
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[6]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -372,7 +525,7 @@ func (x *ListProductAttributeDefinitionsRequest) String() string {
 func (*ListProductAttributeDefinitionsRequest) ProtoMessage() {}
 
 func (x *ListProductAttributeDefinitionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[6]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -385,7 +538,7 @@ func (x *ListProductAttributeDefinitionsRequest) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use ListProductAttributeDefinitionsRequest.ProtoReflect.Descriptor instead.
 func (*ListProductAttributeDefinitionsRequest) Descriptor() ([]byte, []int) {
-	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{6}
+	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListProductAttributeDefinitionsRequest) GetPage() *v1.PageRequest {
@@ -426,7 +579,7 @@ type ListProductAttributeDefinitionsResponse struct {
 
 func (x *ListProductAttributeDefinitionsResponse) Reset() {
 	*x = ListProductAttributeDefinitionsResponse{}
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[7]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -438,7 +591,7 @@ func (x *ListProductAttributeDefinitionsResponse) String() string {
 func (*ListProductAttributeDefinitionsResponse) ProtoMessage() {}
 
 func (x *ListProductAttributeDefinitionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[7]
+	mi := &file_bfstore_catalog_v1_catalog_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -451,7 +604,7 @@ func (x *ListProductAttributeDefinitionsResponse) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use ListProductAttributeDefinitionsResponse.ProtoReflect.Descriptor instead.
 func (*ListProductAttributeDefinitionsResponse) Descriptor() ([]byte, []int) {
-	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{7}
+	return file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListProductAttributeDefinitionsResponse) GetAttributeDefinitions() []*ProductAttributeDefinition {
@@ -472,7 +625,7 @@ var File_bfstore_catalog_v1_catalog_service_proto protoreflect.FileDescriptor
 
 const file_bfstore_catalog_v1_catalog_service_proto_rawDesc = "" +
 	"\n" +
-	"(bfstore/catalog/v1/catalog_service.proto\x12\x12bfstore.catalog.v1\x1a bfstore/catalog/v1/product.proto\x1a\"bfstore/common/v1/pagination.proto\"\x95\x01\n" +
+	"(bfstore/catalog/v1/catalog_service.proto\x12\x12bfstore.catalog.v1\x1a bfstore/catalog/v1/product.proto\x1a\x1dbfstore/common/v1/money.proto\x1a\"bfstore/common/v1/pagination.proto\"\x95\x01\n" +
 	"\x13ListProductsRequest\x122\n" +
 	"\x04page\x18\x01 \x01(\v2\x1e.bfstore.common.v1.PageRequestR\x04page\x12\x1f\n" +
 	"\vcategory_id\x18\x02 \x01(\tR\n" +
@@ -485,7 +638,22 @@ const file_bfstore_catalog_v1_catalog_service_proto_rawDesc = "" +
 	"\n" +
 	"product_id\x18\x01 \x01(\tR\tproductId\"K\n" +
 	"\x12GetProductResponse\x125\n" +
-	"\aproduct\x18\x01 \x01(\v2\x1b.bfstore.catalog.v1.ProductR\aproduct\"\xa4\x01\n" +
+	"\aproduct\x18\x01 \x01(\v2\x1b.bfstore.catalog.v1.ProductR\aproduct\"]\n" +
+	"\x1dValidateProductVariantRequest\x12\x1d\n" +
+	"\n" +
+	"product_id\x18\x01 \x01(\tR\tproductId\x12\x1d\n" +
+	"\n" +
+	"variant_id\x18\x02 \x01(\tR\tvariantId\"\xf9\x01\n" +
+	"\x1eValidateProductVariantResponse\x12\x1d\n" +
+	"\n" +
+	"product_id\x18\x01 \x01(\tR\tproductId\x12\x1d\n" +
+	"\n" +
+	"variant_id\x18\x02 \x01(\tR\tvariantId\x12!\n" +
+	"\fproduct_name\x18\x03 \x01(\tR\vproductName\x12!\n" +
+	"\fvariant_name\x18\x04 \x01(\tR\vvariantName\x127\n" +
+	"\n" +
+	"unit_price\x18\x05 \x01(\v2\x18.bfstore.common.v1.MoneyR\tunitPrice\x12\x1a\n" +
+	"\bsellable\x18\x06 \x01(\bR\bsellable\"\xa4\x01\n" +
 	"\x15ListCategoriesRequest\x122\n" +
 	"\x04page\x18\x01 \x01(\v2\x1e.bfstore.common.v1.PageRequestR\x04page\x12,\n" +
 	"\x12parent_category_id\x18\x02 \x01(\tR\x10parentCategoryId\x12)\n" +
@@ -503,11 +671,12 @@ const file_bfstore_catalog_v1_catalog_service_proto_rawDesc = "" +
 	"\x10include_inactive\x18\x04 \x01(\bR\x0fincludeInactive\"\xc3\x01\n" +
 	"'ListProductAttributeDefinitionsResponse\x12c\n" +
 	"\x15attribute_definitions\x18\x01 \x03(\v2..bfstore.catalog.v1.ProductAttributeDefinitionR\x14attributeDefinitions\x123\n" +
-	"\x04page\x18\x02 \x01(\v2\x1f.bfstore.common.v1.PageResponseR\x04page2\xd6\x03\n" +
+	"\x04page\x18\x02 \x01(\v2\x1f.bfstore.common.v1.PageResponseR\x04page2\xd7\x04\n" +
 	"\x0eCatalogService\x12a\n" +
 	"\fListProducts\x12'.bfstore.catalog.v1.ListProductsRequest\x1a(.bfstore.catalog.v1.ListProductsResponse\x12[\n" +
 	"\n" +
-	"GetProduct\x12%.bfstore.catalog.v1.GetProductRequest\x1a&.bfstore.catalog.v1.GetProductResponse\x12g\n" +
+	"GetProduct\x12%.bfstore.catalog.v1.GetProductRequest\x1a&.bfstore.catalog.v1.GetProductResponse\x12\x7f\n" +
+	"\x16ValidateProductVariant\x121.bfstore.catalog.v1.ValidateProductVariantRequest\x1a2.bfstore.catalog.v1.ValidateProductVariantResponse\x12g\n" +
 	"\x0eListCategories\x12).bfstore.catalog.v1.ListCategoriesRequest\x1a*.bfstore.catalog.v1.ListCategoriesResponse\x12\x9a\x01\n" +
 	"\x1fListProductAttributeDefinitions\x12:.bfstore.catalog.v1.ListProductAttributeDefinitionsRequest\x1a;.bfstore.catalog.v1.ListProductAttributeDefinitionsResponseBGZEgithub.com/mantrobuslawal/bfstore/gen/go/bfstore/catalog/v1;catalogv1b\x06proto3"
 
@@ -523,46 +692,52 @@ func file_bfstore_catalog_v1_catalog_service_proto_rawDescGZIP() []byte {
 	return file_bfstore_catalog_v1_catalog_service_proto_rawDescData
 }
 
-var file_bfstore_catalog_v1_catalog_service_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_bfstore_catalog_v1_catalog_service_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_bfstore_catalog_v1_catalog_service_proto_goTypes = []any{
 	(*ListProductsRequest)(nil),                     // 0: bfstore.catalog.v1.ListProductsRequest
 	(*ListProductsResponse)(nil),                    // 1: bfstore.catalog.v1.ListProductsResponse
 	(*GetProductRequest)(nil),                       // 2: bfstore.catalog.v1.GetProductRequest
 	(*GetProductResponse)(nil),                      // 3: bfstore.catalog.v1.GetProductResponse
-	(*ListCategoriesRequest)(nil),                   // 4: bfstore.catalog.v1.ListCategoriesRequest
-	(*ListCategoriesResponse)(nil),                  // 5: bfstore.catalog.v1.ListCategoriesResponse
-	(*ListProductAttributeDefinitionsRequest)(nil),  // 6: bfstore.catalog.v1.ListProductAttributeDefinitionsRequest
-	(*ListProductAttributeDefinitionsResponse)(nil), // 7: bfstore.catalog.v1.ListProductAttributeDefinitionsResponse
-	(*v1.PageRequest)(nil),                          // 8: bfstore.common.v1.PageRequest
-	(*Product)(nil),                                 // 9: bfstore.catalog.v1.Product
-	(*v1.PageResponse)(nil),                         // 10: bfstore.common.v1.PageResponse
-	(*Category)(nil),                                // 11: bfstore.catalog.v1.Category
-	(*ProductAttributeDefinition)(nil),              // 12: bfstore.catalog.v1.ProductAttributeDefinition
+	(*ValidateProductVariantRequest)(nil),           // 4: bfstore.catalog.v1.ValidateProductVariantRequest
+	(*ValidateProductVariantResponse)(nil),          // 5: bfstore.catalog.v1.ValidateProductVariantResponse
+	(*ListCategoriesRequest)(nil),                   // 6: bfstore.catalog.v1.ListCategoriesRequest
+	(*ListCategoriesResponse)(nil),                  // 7: bfstore.catalog.v1.ListCategoriesResponse
+	(*ListProductAttributeDefinitionsRequest)(nil),  // 8: bfstore.catalog.v1.ListProductAttributeDefinitionsRequest
+	(*ListProductAttributeDefinitionsResponse)(nil), // 9: bfstore.catalog.v1.ListProductAttributeDefinitionsResponse
+	(*v1.PageRequest)(nil),                          // 10: bfstore.common.v1.PageRequest
+	(*Product)(nil),                                 // 11: bfstore.catalog.v1.Product
+	(*v1.PageResponse)(nil),                         // 12: bfstore.common.v1.PageResponse
+	(*v1.Money)(nil),                                // 13: bfstore.common.v1.Money
+	(*Category)(nil),                                // 14: bfstore.catalog.v1.Category
+	(*ProductAttributeDefinition)(nil),              // 15: bfstore.catalog.v1.ProductAttributeDefinition
 }
 var file_bfstore_catalog_v1_catalog_service_proto_depIdxs = []int32{
-	8,  // 0: bfstore.catalog.v1.ListProductsRequest.page:type_name -> bfstore.common.v1.PageRequest
-	9,  // 1: bfstore.catalog.v1.ListProductsResponse.products:type_name -> bfstore.catalog.v1.Product
-	10, // 2: bfstore.catalog.v1.ListProductsResponse.page:type_name -> bfstore.common.v1.PageResponse
-	9,  // 3: bfstore.catalog.v1.GetProductResponse.product:type_name -> bfstore.catalog.v1.Product
-	8,  // 4: bfstore.catalog.v1.ListCategoriesRequest.page:type_name -> bfstore.common.v1.PageRequest
-	11, // 5: bfstore.catalog.v1.ListCategoriesResponse.categories:type_name -> bfstore.catalog.v1.Category
-	10, // 6: bfstore.catalog.v1.ListCategoriesResponse.page:type_name -> bfstore.common.v1.PageResponse
-	8,  // 7: bfstore.catalog.v1.ListProductAttributeDefinitionsRequest.page:type_name -> bfstore.common.v1.PageRequest
-	12, // 8: bfstore.catalog.v1.ListProductAttributeDefinitionsResponse.attribute_definitions:type_name -> bfstore.catalog.v1.ProductAttributeDefinition
-	10, // 9: bfstore.catalog.v1.ListProductAttributeDefinitionsResponse.page:type_name -> bfstore.common.v1.PageResponse
-	0,  // 10: bfstore.catalog.v1.CatalogService.ListProducts:input_type -> bfstore.catalog.v1.ListProductsRequest
-	2,  // 11: bfstore.catalog.v1.CatalogService.GetProduct:input_type -> bfstore.catalog.v1.GetProductRequest
-	4,  // 12: bfstore.catalog.v1.CatalogService.ListCategories:input_type -> bfstore.catalog.v1.ListCategoriesRequest
-	6,  // 13: bfstore.catalog.v1.CatalogService.ListProductAttributeDefinitions:input_type -> bfstore.catalog.v1.ListProductAttributeDefinitionsRequest
-	1,  // 14: bfstore.catalog.v1.CatalogService.ListProducts:output_type -> bfstore.catalog.v1.ListProductsResponse
-	3,  // 15: bfstore.catalog.v1.CatalogService.GetProduct:output_type -> bfstore.catalog.v1.GetProductResponse
-	5,  // 16: bfstore.catalog.v1.CatalogService.ListCategories:output_type -> bfstore.catalog.v1.ListCategoriesResponse
-	7,  // 17: bfstore.catalog.v1.CatalogService.ListProductAttributeDefinitions:output_type -> bfstore.catalog.v1.ListProductAttributeDefinitionsResponse
-	14, // [14:18] is the sub-list for method output_type
-	10, // [10:14] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 0: bfstore.catalog.v1.ListProductsRequest.page:type_name -> bfstore.common.v1.PageRequest
+	11, // 1: bfstore.catalog.v1.ListProductsResponse.products:type_name -> bfstore.catalog.v1.Product
+	12, // 2: bfstore.catalog.v1.ListProductsResponse.page:type_name -> bfstore.common.v1.PageResponse
+	11, // 3: bfstore.catalog.v1.GetProductResponse.product:type_name -> bfstore.catalog.v1.Product
+	13, // 4: bfstore.catalog.v1.ValidateProductVariantResponse.unit_price:type_name -> bfstore.common.v1.Money
+	10, // 5: bfstore.catalog.v1.ListCategoriesRequest.page:type_name -> bfstore.common.v1.PageRequest
+	14, // 6: bfstore.catalog.v1.ListCategoriesResponse.categories:type_name -> bfstore.catalog.v1.Category
+	12, // 7: bfstore.catalog.v1.ListCategoriesResponse.page:type_name -> bfstore.common.v1.PageResponse
+	10, // 8: bfstore.catalog.v1.ListProductAttributeDefinitionsRequest.page:type_name -> bfstore.common.v1.PageRequest
+	15, // 9: bfstore.catalog.v1.ListProductAttributeDefinitionsResponse.attribute_definitions:type_name -> bfstore.catalog.v1.ProductAttributeDefinition
+	12, // 10: bfstore.catalog.v1.ListProductAttributeDefinitionsResponse.page:type_name -> bfstore.common.v1.PageResponse
+	0,  // 11: bfstore.catalog.v1.CatalogService.ListProducts:input_type -> bfstore.catalog.v1.ListProductsRequest
+	2,  // 12: bfstore.catalog.v1.CatalogService.GetProduct:input_type -> bfstore.catalog.v1.GetProductRequest
+	4,  // 13: bfstore.catalog.v1.CatalogService.ValidateProductVariant:input_type -> bfstore.catalog.v1.ValidateProductVariantRequest
+	6,  // 14: bfstore.catalog.v1.CatalogService.ListCategories:input_type -> bfstore.catalog.v1.ListCategoriesRequest
+	8,  // 15: bfstore.catalog.v1.CatalogService.ListProductAttributeDefinitions:input_type -> bfstore.catalog.v1.ListProductAttributeDefinitionsRequest
+	1,  // 16: bfstore.catalog.v1.CatalogService.ListProducts:output_type -> bfstore.catalog.v1.ListProductsResponse
+	3,  // 17: bfstore.catalog.v1.CatalogService.GetProduct:output_type -> bfstore.catalog.v1.GetProductResponse
+	5,  // 18: bfstore.catalog.v1.CatalogService.ValidateProductVariant:output_type -> bfstore.catalog.v1.ValidateProductVariantResponse
+	7,  // 19: bfstore.catalog.v1.CatalogService.ListCategories:output_type -> bfstore.catalog.v1.ListCategoriesResponse
+	9,  // 20: bfstore.catalog.v1.CatalogService.ListProductAttributeDefinitions:output_type -> bfstore.catalog.v1.ListProductAttributeDefinitionsResponse
+	16, // [16:21] is the sub-list for method output_type
+	11, // [11:16] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_bfstore_catalog_v1_catalog_service_proto_init() }
@@ -577,7 +752,7 @@ func file_bfstore_catalog_v1_catalog_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bfstore_catalog_v1_catalog_service_proto_rawDesc), len(file_bfstore_catalog_v1_catalog_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
