@@ -12,6 +12,8 @@
 #   make up
 #   make down
 #   make local-db-fresh
+#   make local-db-fresh-catalog
+#   make local-db-fresh-basket
 
 SHELL := /bin/bash
 
@@ -22,6 +24,9 @@ DOCKER_COMPOSE := docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE)
 MYSQL_ROOT_PASSWORD := bfstore_root_password
 MYSQL_INIT_PATH ?= deploy/local/mysql/init
 MYSQL_VOLUME := $(PROJECT_NAME)_bfstore_mysql_data
+
+CATALOG_MIGRATIONS_PATH ?= db/catalog/migrations
+CATALOG_DATABASE_URL ?= mysql://bfstore_catalog:bfstore_catalog_password@tcp(localhost:3306)/bfstore_catalog?multiStatements=true&parseTime=true
 
 BASKET_MIGRATIONS_PATH ?= db/basket/migrations
 BASKET_DATABASE_URL ?= mysql://bfstore_basket:bfstore_basket_password@tcp(localhost:3306)/bfstore_basket?multiStatements=true&parseTime=true
@@ -145,6 +150,21 @@ catalog-list-products: ## List catalog-service products
 catalog-list-categories: ## List catalog-service product categories
 	grpcurl -plaintext -d '{"page":{"page_size":5}}' localhost:50051 bfstore.catalog.v1.CatalogService/ListCategories
 
+.PHONY: catalog-validate-product-variant
+catalog-validate-product-variant: ## Validate a product/variant pair through catalog-service. Usage: make catalog-validate-product-variant PRODUCT_ID=prod_x VARIANT_ID=var_y
+	@if [ -z "$(PRODUCT_ID)" ]; then \
+		echo "PRODUCT_ID is required. Example: make catalog-validate-product-variant PRODUCT_ID=prod_x VARIANT_ID=var_y"; \
+		exit 1; \
+	fi
+	@if [ -z "$(VARIANT_ID)" ]; then \
+		echo "VARIANT_ID is required. Example: make catalog-validate-product-variant PRODUCT_ID=prod_x VARIANT_ID=var_y"; \
+		exit 1; \
+	fi
+	grpcurl -plaintext \
+		-d '{"product_id":"$(PRODUCT_ID)","variant_id":"$(VARIANT_ID)"}' \
+		localhost:50051 \
+		bfstore.catalog.v1.CatalogService/ValidateProductVariant
+
 .PHONY: catalog-list-products-with-correlation
 catalog-list-products-with-correlation: ## Test correlation ID propagation against catalog-service
 	grpcurl -plaintext \
@@ -210,10 +230,35 @@ local-db-bootstrap: ## Create local service databases, users, and grants
 	$(DOCKER_COMPOSE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/001-create-service-databases.sql
 	$(DOCKER_COMPOSE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) < $(MYSQL_INIT_PATH)/002-create-service-users.sql
 
+.PHONY: local-db-check-catalog-user
+local-db-check-catalog-user: ## Check catalog database user and grants
+	$(DOCKER_COMPOSE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e "SELECT user, host FROM mysql.user WHERE user = 'bfstore_catalog';"
+	$(DOCKER_COMPOSE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e "SHOW GRANTS FOR 'bfstore_catalog'@'%';"
+
 .PHONY: local-db-check-basket-user
 local-db-check-basket-user: ## Check basket database user and grants
 	$(DOCKER_COMPOSE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e "SELECT user, host FROM mysql.user WHERE user = 'bfstore_basket';"
 	$(DOCKER_COMPOSE) exec -T mysql mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e "SHOW GRANTS FOR 'bfstore_basket'@'%';"
+
+.PHONY: catalog-db-migrate-up
+catalog-db-migrate-up: ## Run catalog-service database migrations
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" up
+
+.PHONY: catalog-db-migrate-down
+catalog-db-migrate-down: ## Roll back one catalog-service database migration
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" down 1
+
+.PHONY: catalog-db-migrate-version
+catalog-db-migrate-version: ## Show catalog-service database migration version
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" version
+
+.PHONY: catalog-db-migrate-force
+catalog-db-migrate-force: ## Force catalog-service migration version. Usage: make catalog-db-migrate-force VERSION=1
+	@if [ -z "$(VERSION)" ]; then \
+		echo "VERSION is required. Example: make catalog-db-migrate-force VERSION=1"; \
+		exit 1; \
+	fi
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" force $(VERSION)
 
 .PHONY: basket-db-migrate-up
 basket-db-migrate-up: ## Run basket-service database migrations
@@ -235,13 +280,38 @@ basket-db-migrate-force: ## Force basket-service migration version. Usage: make 
 	fi
 	migrate -path $(BASKET_MIGRATIONS_PATH) -database "$(BASKET_DATABASE_URL)" force $(VERSION)
 
-.PHONY: local-db-fresh
-local-db-fresh: ## Rebuild local MySQL from scratch and run basket migrations
+.PHONY: local-db-fresh-catalog
+local-db-fresh-catalog: ## Rebuild local MySQL from scratch and run catalog migrations
 	$(MAKE) local-db-reset
 	$(MAKE) local-db-up
 	$(MAKE) local-db-wait
 	$(MAKE) local-db-check-root
 	$(MAKE) local-db-bootstrap
+	$(MAKE) local-db-check-catalog-user
+	$(MAKE) catalog-db-migrate-up
+	$(MAKE) catalog-db-migrate-version
+
+.PHONY: local-db-fresh-basket
+local-db-fresh-basket: ## Rebuild local MySQL from scratch and run basket migrations
+	$(MAKE) local-db-reset
+	$(MAKE) local-db-up
+	$(MAKE) local-db-wait
+	$(MAKE) local-db-check-root
+	$(MAKE) local-db-bootstrap
+	$(MAKE) local-db-check-basket-user
+	$(MAKE) basket-db-migrate-up
+	$(MAKE) basket-db-migrate-version
+
+.PHONY: local-db-fresh
+local-db-fresh: ## Rebuild local MySQL from scratch and run catalog and basket migrations
+	$(MAKE) local-db-reset
+	$(MAKE) local-db-up
+	$(MAKE) local-db-wait
+	$(MAKE) local-db-check-root
+	$(MAKE) local-db-bootstrap
+	$(MAKE) local-db-check-catalog-user
+	$(MAKE) catalog-db-migrate-up
+	$(MAKE) catalog-db-migrate-version
 	$(MAKE) local-db-check-basket-user
 	$(MAKE) basket-db-migrate-up
 	$(MAKE) basket-db-migrate-version
