@@ -3,13 +3,15 @@ syntax = "proto3";
 package bfstore.catalog.v1;
 
 import "bfstore/catalog/v1/product.proto";
+import "bfstore/common/v1/money.proto";
 import "bfstore/common/v1/pagination.proto";
 
 option go_package = "github.com/mantrobuslawal/bfstore/gen/go/bfstore/catalog/v1;catalogv1";
 
-// CatalogService provides customer-facing catalogue read APIs.
+// CatalogService provides customer-facing catalog read APIs and narrowly
+// scoped service-to-service validation APIs.
 //
-// Catalogue Service owns product truth.
+// Catalog Service owns product truth.
 // Search Service may later own denormalised browse/search projections.
 service CatalogService {
   // ListProducts returns customer-visible products.
@@ -19,6 +21,16 @@ service CatalogService {
 
   // GetProduct returns a single customer-visible product by ID.
   rpc GetProduct(GetProductRequest) returns (GetProductResponse);
+
+  // ValidateProductVariant validates that a product and variant pairing exists
+  // and is currently sellable.
+  //
+  // Basket Service uses this endpoint when adding an item to a basket so it can
+  // store a product/variant snapshot without owning catalog truth.
+  //
+  // Order Service should still revalidate product, variant, price, and stock
+  // before committing an order.
+  rpc ValidateProductVariant(ValidateProductVariantRequest) returns (ValidateProductVariantResponse);
 
   // ListCategories returns customer-visible product categories.
   rpc ListCategories(ListCategoriesRequest) returns (ListCategoriesResponse);
@@ -57,6 +69,40 @@ message GetProductRequest {
 
 message GetProductResponse {
   Product product = 1;
+}
+
+// ValidateProductVariantRequest identifies the product and variant that another
+// service wants to use.
+//
+// The Catalog Service must confirm that:
+// - the product exists
+// - the variant exists
+// - the variant belongs to the product
+// - the product and variant are sellable
+message ValidateProductVariantRequest {
+  string product_id = 1;
+  string variant_id = 2;
+}
+
+// ValidateProductVariantResponse returns a small authoritative snapshot that
+// Basket Service can store against a basket item.
+//
+// This response is intentionally smaller than Product because basket-service
+// only needs enough information to show the basket and calculate line totals.
+// The snapshot is not final order truth; checkout/order placement should
+// revalidate before payment.
+message ValidateProductVariantResponse {
+  string product_id = 1;
+  string variant_id = 2;
+
+  string product_name = 3;
+  string variant_name = 4;
+
+  bfstore.common.v1.Money unit_price = 5;
+
+  // True when the product and variant are currently allowed to be added to a
+  // basket.
+  bool sellable = 6;
 }
 
 message ListCategoriesRequest {
