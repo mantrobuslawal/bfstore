@@ -1,6 +1,7 @@
 # Catalog Database
 
-This directory contains local database artefacts for catalog-service.
+This directory contains local database artefacts for catalog-service.</br>
+[The catalog seed manifest is located here.](https://github.com/mantrobuslawal/bfstore/tree/basket-service-v1/docs/data/catalog-large-seed-manifest.md)
 
 Catalog Service owns the product catalog domain for bfstore.
 
