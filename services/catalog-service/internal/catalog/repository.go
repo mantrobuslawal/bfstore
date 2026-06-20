@@ -5,38 +5,55 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 )
 
-// Repository defines Catalogue Service persistence behaviour.
+// Repository defines Catalog Service persistence behaviour.
 type Repository interface {
 	ListProducts(ctx context.Context, query ListQuery) ([]Product, error)
 
 	GetProduct(ctx context.Context, productID ProductID) (Product, error)
+
+	ValidateProductVariant(ctx context.Context, query ValidateProductVariantQuery) (ValidatedProductVariant, error)
 
 	ListCategories(ctx context.Context, query ListQuery) ([]Category, error)
 
 	ListProductAttributeDefinitions(ctx context.Context, query ListQuery) ([]ProductAttributeDefinition, error)
 }
 
-// Repository stores and retrieves catalogue data from MySQL.
-type MySQLRepository struct{ db *sql.DB }
+// Repository stores and retrieves catalog data from MySQL.
+type MySQLRepository struct {
+	db     *sql.DB
+	logger *slog.Logger
+}
 
 var _ Repository = (*MySQLRepository)(nil)
 
-// NewMySQLRepository creates a MySQL-backed catalogue repository.
-func NewMySQLRepository(db *sql.DB) *MySQLRepository {
-	return &MySQLRepository{db: db}
+// NewMySQLRepository creates a MySQL-backed catalog repository.
+func NewMySQLRepository(db *sql.DB, logger *slog.Logger) *MySQLRepository {
+	if db == nil {
+		panic("catalog: nil database")
+	}
+
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &MySQLRepository{
+		db:     db,
+		logger: logger.With("component", "catalog_mysql_repository"),
+	}
 }
 
-// ListProducts returns products from the catalogue database.
+// ListProducts returns products from the catalog database.
 //
-// Returns ErrProductNotFound when produccts not found.
 // Low-level database errors are wrapped to provide extra context.
 func (r *MySQLRepository) ListProducts(ctx context.Context, query ListQuery) ([]Product, error) {
 	includeInactive := false
 	if len(query.FilterOptions) > 0 {
 		includeInactive = query.FilterOptions[0]
 	}
+
 	args := []any{query.ID, query.ID, includeInactive}
 
 	sqlText := `
@@ -82,6 +99,12 @@ func (r *MySQLRepository) ListProducts(ctx context.Context, query ListQuery) ([]
 
 	rows, err := r.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to query products",
+			"error", err,
+			"category_id", query.ID,
+			"include_inactive", includeInactive,
+		)
+
 		return nil, fmt.Errorf("list products: %w", err)
 	}
 	defer rows.Close()
@@ -131,6 +154,12 @@ func (r *MySQLRepository) ListProducts(ctx context.Context, query ListQuery) ([]
 		return nil, fmt.Errorf("iterate product rows: %w", err)
 	}
 
+	r.logger.DebugContext(ctx, "listed products",
+		"category_id", query.ID,
+		"product_count", len(products),
+		"include_inactive", includeInactive,
+	)
+
 	return products, nil
 }
 
@@ -160,15 +189,108 @@ func (r *MySQLRepository) GetProduct(ctx context.Context, productID ProductID) (
 	product.Attributes = attributes
 	product.Images = images
 
+	r.logger.DebugContext(ctx, "got product",
+		"product_id", productID,
+		"variant_count", len(variants),
+		"attribute_count", len(attributes),
+		"image_count", len(images),
+	)
+
 	return product, nil
 }
 
-// ListCategories returns categories from the catalogue database.
+// ValidateProductVariant returns a small product/variant snapshot for internal
+// service-to-service validation.
+//
+// The repository confirms identity and ownership. The service layer applies
+// business rules such as sellability.
+func (r *MySQLRepository) ValidateProductVariant(
+	ctx context.Context,
+	query ValidateProductVariantQuery,
+) (ValidatedProductVariant, error) {
+	const sqlText = `
+		SELECT
+		  p.product_id,
+		  p.name,
+		  p.status,
+		  v.variant_id,
+		  v.variant_name,
+		  v.status,
+		  v.price_minor,
+		  v.currency_code
+		FROM products p
+		INNER JOIN product_variants v
+		  ON v.product_id = p.product_id
+		WHERE p.product_id = ?
+		  AND v.variant_id = ?
+		LIMIT 1
+	`
+
+	var result ValidatedProductVariant
+	var rawProductStatus string
+	var rawVariantStatus string
+
+	err := r.db.QueryRowContext(
+		ctx,
+		sqlText,
+		query.ProductID,
+		query.VariantID,
+	).Scan(
+		&result.ProductID,
+		&result.ProductName,
+		&rawProductStatus,
+		&result.VariantID,
+		&result.VariantName,
+		&rawVariantStatus,
+		&result.UnitPrice.AmountMinor,
+		&result.UnitPrice.CurrencyCode,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return r.classifyMissingProductVariant(ctx, query)
+		}
+
+		r.logger.ErrorContext(ctx, "failed to query product variant validation snapshot",
+			"error", err,
+			"product_id", query.ProductID,
+			"variant_id", query.VariantID,
+		)
+
+		return ValidatedProductVariant{}, fmt.Errorf("query product variant validation snapshot: %w", err)
+	}
+
+	productStatus, err := ParseToProductStatus(rawProductStatus)
+	if err != nil {
+		return ValidatedProductVariant{}, fmt.Errorf("parse product status for product %q: %w", query.ProductID, err)
+	}
+
+	variantStatus, err := ParseToProductVariantStatus(rawVariantStatus)
+	if err != nil {
+		return ValidatedProductVariant{}, fmt.Errorf("parse product variant status for variant %q: %w", query.VariantID, err)
+	}
+
+	result.ProductStatus = productStatus
+	result.VariantStatus = variantStatus
+	result.Sellable = string(productStatus) == "active" && string(variantStatus) == "active"
+
+	r.logger.DebugContext(ctx, "loaded product variant validation snapshot",
+		"product_id", result.ProductID,
+		"variant_id", result.VariantID,
+		"product_status", result.ProductStatus,
+		"variant_status", result.VariantStatus,
+		"sellable", result.Sellable,
+	)
+
+	return result, nil
+}
+
+// ListCategories returns categories from the catalog database.
 func (r *MySQLRepository) ListCategories(ctx context.Context, query ListQuery) ([]Category, error) {
 	includeInactive := false
 	if len(query.FilterOptions) > 0 {
 		includeInactive = query.FilterOptions[0]
 	}
+
 	args := []any{query.ID, query.ID, includeInactive}
 
 	sqlText := `
@@ -212,6 +334,12 @@ func (r *MySQLRepository) ListCategories(ctx context.Context, query ListQuery) (
 
 	rows, err := r.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to query categories",
+			"error", err,
+			"parent_category_id", query.ID,
+			"include_inactive", includeInactive,
+		)
+
 		return nil, err
 	}
 	defer rows.Close()
@@ -240,8 +368,8 @@ func (r *MySQLRepository) ListCategories(ctx context.Context, query ListQuery) (
 		}
 
 		if parentCategoryID.Valid {
-			parentId := CategoryID(parentCategoryID.String)
-			category.ParentCategoryID = &parentId
+			parentID := CategoryID(parentCategoryID.String)
+			category.ParentCategoryID = &parentID
 		}
 
 		if description.Valid {
@@ -261,11 +389,20 @@ func (r *MySQLRepository) ListCategories(ctx context.Context, query ListQuery) (
 		return nil, err
 	}
 
+	r.logger.DebugContext(ctx, "listed categories",
+		"parent_category_id", query.ID,
+		"category_count", len(categories),
+		"include_inactive", includeInactive,
+	)
+
 	return categories, nil
 }
 
-// ListProductAttributeDefinitons returns product attribute definitions.
-func (r *MySQLRepository) ListProductAttributeDefinitions(ctx context.Context, query ListQuery) ([]ProductAttributeDefinition, error) {
+// ListProductAttributeDefinitions returns product attribute definitions.
+func (r *MySQLRepository) ListProductAttributeDefinitions(
+	ctx context.Context,
+	query ListQuery,
+) ([]ProductAttributeDefinition, error) {
 	includeInactive := false
 	isFilterable := false
 
@@ -325,6 +462,13 @@ func (r *MySQLRepository) ListProductAttributeDefinitions(ctx context.Context, q
 
 	rows, err := r.db.QueryContext(ctx, sqlText, args...)
 	if err != nil {
+		r.logger.ErrorContext(ctx, "failed to query product attribute definitions",
+			"error", err,
+			"category_id", query.ID,
+			"include_inactive", includeInactive,
+			"is_filterable", isFilterable,
+		)
+
 		return nil, err
 	}
 	defer rows.Close()
@@ -349,7 +493,8 @@ func (r *MySQLRepository) ListProductAttributeDefinitions(ctx context.Context, q
 			&productAttributeDefinition.IsFilterable,
 			&productAttributeDefinition.IsVariantDefining,
 			&rawStatus,
-			&productAttributeDefinition.CreatedAt); err != nil {
+			&productAttributeDefinition.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 
@@ -369,7 +514,7 @@ func (r *MySQLRepository) ListProductAttributeDefinitions(ctx context.Context, q
 
 		status := ProductAttributeDefinitionStatus(rawStatus)
 		if !status.IsValid() {
-			return nil, fmt.Errorf("invalid product attribute definition ststus %q", rawStatus)
+			return nil, fmt.Errorf("invalid product attribute definition status %q", rawStatus)
 		}
 		productAttributeDefinition.Status = status
 
@@ -380,7 +525,73 @@ func (r *MySQLRepository) ListProductAttributeDefinitions(ctx context.Context, q
 		return nil, err
 	}
 
+	r.logger.DebugContext(ctx, "listed product attribute definitions",
+		"category_id", query.ID,
+		"attribute_definition_count", len(productAttributeDefinitions),
+		"include_inactive", includeInactive,
+		"is_filterable", isFilterable,
+	)
+
 	return productAttributeDefinitions, nil
+}
+
+func (r *MySQLRepository) classifyMissingProductVariant(
+	ctx context.Context,
+	query ValidateProductVariantQuery,
+) (ValidatedProductVariant, error) {
+	productExists, err := r.productExists(ctx, query.ProductID)
+	if err != nil {
+		return ValidatedProductVariant{}, fmt.Errorf("check product exists %q: %w", query.ProductID, err)
+	}
+
+	if !productExists {
+		return ValidatedProductVariant{}, ErrProductNotFound
+	}
+
+	variantExists, err := r.variantExists(ctx, query.VariantID)
+	if err != nil {
+		return ValidatedProductVariant{}, fmt.Errorf("check variant exists %q: %w", query.VariantID, err)
+	}
+
+	if !variantExists {
+		return ValidatedProductVariant{}, ErrProductVariantNotFound
+	}
+
+	return ValidatedProductVariant{}, ErrProductVariantProductMismatch
+}
+
+func (r *MySQLRepository) productExists(ctx context.Context, productID ProductID) (bool, error) {
+	const query = `
+		SELECT EXISTS(
+			SELECT 1
+			FROM products
+			WHERE product_id = ?
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, query, productID).Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
+func (r *MySQLRepository) variantExists(ctx context.Context, variantID VariantID) (bool, error) {
+	const query = `
+		SELECT EXISTS(
+			SELECT 1
+			FROM product_variants
+			WHERE variant_id = ?
+		)
+	`
+
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, query, variantID).Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
 }
 
 func (r *MySQLRepository) getProductRow(ctx context.Context, productID ProductID) (Product, error) {
@@ -592,6 +803,7 @@ func (r *MySQLRepository) listProductAttributeValues(ctx context.Context, produc
 
 		values = append(values, &value)
 	}
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate product attribute value rows: %w", err)
 	}
