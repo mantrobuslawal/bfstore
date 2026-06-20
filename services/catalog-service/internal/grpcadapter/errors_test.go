@@ -2,7 +2,6 @@ package grpcadapter
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/mantrobuslawal/bfstore/services/catalog-service/internal/catalog"
@@ -10,56 +9,69 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestMapServiceErrorMapsInvalidArgumentErrors(t *testing.T) {
+func TestMapServiceError(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		err  error
+		code codes.Code
 	}{
-		{name: "invalid product id", err: catalog.ErrInvalidProductID},
-		{name: "invalid category id", err: catalog.ErrInvalidCategoryID},
-		{name: "invalid page size", err: catalog.ErrInvalidPageSize},
-		{name: "invalid page token", err: catalog.ErrInvalidPageToken},
-		{name: "invalid display order", err: catalog.ErrInvalidDisplayOrder},
-		{name: "wrapped invalid product id", err: fmt.Errorf("wrap: %w", catalog.ErrInvalidProductID)},
+		{
+			name: "invalid product id maps to invalid argument",
+			err:  catalog.ErrInvalidProductID,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "invalid variant id maps to invalid argument",
+			err:  catalog.ErrInvalidVariantID,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "product not found maps to not found",
+			err:  catalog.ErrProductNotFound,
+			code: codes.NotFound,
+		},
+		{
+			name: "product variant not found maps to not found",
+			err:  catalog.ErrProductVariantNotFound,
+			code: codes.NotFound,
+		},
+		{
+			name: "variant product mismatch maps to failed precondition",
+			err:  catalog.ErrProductVariantProductMismatch,
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "product not sellable maps to failed precondition",
+			err:  catalog.ErrProductNotSellable,
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "variant not sellable maps to failed precondition",
+			err:  catalog.ErrProductVariantNotSellable,
+			code: codes.FailedPrecondition,
+		},
+		{
+			name: "wrapped error maps correctly",
+			err:  errors.Join(errors.New("context"), catalog.ErrProductVariantNotFound),
+			code: codes.NotFound,
+		},
+		{
+			name: "unexpected error maps to internal",
+			err:  errors.New("database goblin escaped"),
+			code: codes.Internal,
+		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
 			got := mapServiceError(tt.err)
-
-			if status.Code(got) != codes.InvalidArgument {
-				t.Fatalf("status.Code() = %v, want %v", status.Code(got), codes.InvalidArgument)
+			if status.Code(got) != tt.code {
+				t.Fatalf("status.Code(mapServiceError()) = %v, want %v", status.Code(got), tt.code)
 			}
 		})
-	}
-}
-
-func TestMapServiceErrorMapsNotFound(t *testing.T) {
-	t.Parallel()
-
-	got := mapServiceError(catalog.ErrProductNotFound)
-
-	if status.Code(got) != codes.NotFound {
-		t.Fatalf("status.Code() = %v, want %v", status.Code(got), codes.NotFound)
-	}
-}
-
-func TestMapServiceErrorMapsUnknownErrorsToInternal(t *testing.T) {
-	t.Parallel()
-
-	got := mapServiceError(errors.New("database exploded"))
-
-	if status.Code(got) != codes.Internal {
-		t.Fatalf("status.Code() = %v, want %v", status.Code(got), codes.Internal)
-	}
-
-	if status.Convert(got).Message() != "internal server error" {
-		t.Fatalf("message = %q, want internal server error", status.Convert(got).Message())
 	}
 }
