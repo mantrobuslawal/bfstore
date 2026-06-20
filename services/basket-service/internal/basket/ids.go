@@ -10,13 +10,11 @@ import (
 )
 
 const (
-	basketIDPrefix     = "basket"
-	basketItemIDPrefix = "bitem"
-
+	basketIDPrefix        = "basket"
+	basketItemIDPrefix    = "bitem"
 	ulidEncodedLength     = 26
 	checksumEncodedLength = 8
-
-	crockfordAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+	crockfordAlphabet     = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 )
 
 var (
@@ -68,7 +66,7 @@ func newPrefixedID(prefix string, now func() time.Time) (string, error) {
 }
 
 func validatePrefixedID(id string, expectedPrefix string) error {
-	parts := strings.Split(id, "_")
+	parts := strings.Split(strings.TrimSpace(id), "_")
 	if len(parts) != 3 {
 		return ErrInvalidIDFormat
 	}
@@ -151,8 +149,6 @@ func isValidCrockford(value string, expectedLength int) bool {
 func encodeCrockford128(value [16]byte) string {
 	var out [ulidEncodedLength]byte
 
-	// Treat the 128-bit value as a stream of bits and emit 5-bit groups.
-	// There are 130 output bits, so the first group is padded with two zero bits.
 	var bitBuffer uint32
 	var bitCount uint8
 	outIndex := 0
