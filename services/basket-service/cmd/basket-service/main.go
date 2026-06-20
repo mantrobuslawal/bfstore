@@ -19,7 +19,6 @@ import (
 	"github.com/mantrobuslawal/bfstore/services/basket-service/internal/database"
 	basketgrpc "github.com/mantrobuslawal/bfstore/services/basket-service/internal/grpcadapter"
 	baskethealth "github.com/mantrobuslawal/bfstore/services/basket-service/internal/health"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
@@ -31,7 +30,7 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
-	}))
+	})).With("service", "basket-service")
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -58,7 +57,6 @@ func main() {
 	}
 
 	var telemetryRuntime *telemetry.Runtime
-
 	if cfg.Telemetry.TelemetryEnabled {
 		telemetryConfig := telemetry.DefaultConfig("basket-service")
 		telemetryConfig.Environment = cfg.Environment
@@ -74,21 +72,18 @@ func main() {
 			logger.Error("failed to setup telemetry", "error", err)
 			os.Exit(1)
 		}
+
 		logger.Info(
 			"telemetry enabled",
 			"service", telemetryConfig.ServiceName,
 			"environment", telemetryConfig.Environment,
-			"oltp_enpoint", telemetryConfig.OTLPEndpoint,
+			"otlp_endpoint", telemetryConfig.OTLPEndpoint,
 			"traces_enabled", telemetryConfig.TracesEnabled,
-			"metrics_enabled", telemetryConfig.TracesEnabled,
+			"metrics_enabled", telemetryConfig.MetricsEnabled,
 		)
-
 	}
 
-	repository := basket.NewMySQLRepository(db, logger.With(
-		"service", "basket_service",
-		"component", "basket_repository",
-	))
+	repository := basket.NewMySQLRepository(db, logger.With("component", "basket_repository"))
 
 	catalogConn, err := grpc.NewClient(
 		cfg.CatalogGRPCAddress,
@@ -105,25 +100,19 @@ func main() {
 
 	catalogClient := basket.NewCatalogGRPCClient(
 		catalogv1.NewCatalogServiceClient(catalogConn),
-		logger.With(
-			"service", "basket_service",
-			"component", "catalog_grpc_client",
-		),
+		logger.With("component", "catalog_grpc_client"),
 		cfg.CatalogRequestTimeout,
 	)
 
 	basketService := basket.NewService(
 		repository,
-		*catalogClient,
-		logger.With(
-			"service", "basket_service",
-			"component", "basket_service",
-		),
+		catalogClient,
+		logger.With("component", "basket_service"),
 	)
 
 	grpcServer, err := basketgrpc.NewServer(basketService, logger)
 	if err != nil {
-		logger.Error("failed to setup requestmetrics interceptor", "error", err)
+		logger.Error("failed to setup gRPC server", "error", err)
 		os.Exit(1)
 	}
 
@@ -138,7 +127,6 @@ func main() {
 	healthManager.RegisterService(basketServiceName)
 
 	basketHealthchecker := baskethealth.NewChecker(db)
-
 	if err := basketHealthchecker.Ready(ctx); err != nil {
 		logger.Error("service is not ready", "error", err)
 		os.Exit(1)
@@ -147,12 +135,14 @@ func main() {
 	logger.Info("database readiness check passed")
 
 	healthManager.MarkServing()
-
 	logger.Info("grpc health service is registered")
 
 	listener, err := net.Listen("tcp", ":"+cfg.GRPCPort)
 	if err != nil {
-		logger.Error("failed to listen for gRPC", "port", cfg.GRPCPort, "error", err)
+		logger.Error("failed to listen for gRPC",
+			"port", cfg.GRPCPort,
+			"error", err,
+		)
 		os.Exit(1)
 	}
 
@@ -163,12 +153,13 @@ func main() {
 		serverErr <- grpcServer.Serve(listener)
 	}()
 
-	go func() { monitorReadiness(ctx, logger, basketHealthchecker, healthManager) }()
+	go func() {
+		monitorReadiness(ctx, logger, basketHealthchecker, healthManager)
+	}()
 
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
-
 	case err := <-serverErr:
 		if err != nil {
 			logger.Error("gRPC server failed", "error", err)
@@ -193,6 +184,7 @@ func main() {
 	defer cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		grpcServer.GracefulStop()
 		close(done)
@@ -219,7 +211,6 @@ func monitorReadiness(
 	checker *baskethealth.Checker,
 	healthServer *healthcheck.Manager,
 ) {
-
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -228,7 +219,6 @@ func monitorReadiness(
 		case <-ctx.Done():
 			healthServer.MarkNotServing()
 			return
-
 		case <-ticker.C:
 			if err := checker.Ready(ctx); err != nil {
 				logger.Warn("readiness check failed", "error", err)
@@ -239,5 +229,4 @@ func monitorReadiness(
 			healthServer.MarkServing()
 		}
 	}
-
 }
