@@ -1,6 +1,7 @@
 # Catalog Seed Data
 
-This directory contains local/demo seed data for the bfstore catalog-service.
+This directory contains local/demo seed data for the bfstore catalog-service.<br>
+[The catalog seed manifest is located here.](https://github.com/mantrobuslawal/bfstore/tree/basket-service-v1/docs/data/catalog-large-seed-manifest.md)
 
 Seed data is used to make local development, manual testing, smoke checks, demos,
 and portfolio walkthroughs easier. It is not part of the schema migration
