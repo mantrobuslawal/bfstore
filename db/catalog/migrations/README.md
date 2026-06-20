@@ -1,475 +1,239 @@
-# `db/catalog/migrations`
+# Catalog Database Migrations
 
-## 1. Purpose
+This directory contains catalog-service database migrations.
 
-This directory contains database migrations for the Catalogue Service schema.
+The catalog service owns the `bfstore_catalog` database. Only catalog-service
+migrations should create, change, or drop objects in this schema.
 
-Catalogue Service owns governed product catalogue data, including products, variants, categories, category-scoped attribute definitions, product attribute values, product status, and product price data in the initial version.
+## Tool
 
----
+bfstore uses `golang-migrate` for service-owned database migrations.
 
-## 2. Owning Service
+Install the CLI with MySQL support:
 
-```text
-catalog-service
+```bash
+go install -tags 'mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 ```
 
-Owned schema:
+Confirm the CLI is available:
 
-```text
-bfstore_catalog
+```bash
+migrate -version
 ```
 
-Only Catalogue Service migrations should modify this schema.
+## Current migration files
 
----
-
-## 3. Design Direction
-
-The catalogue model must support varied future product types such as:
-
-```text
-curtains
-bed frames
-mattresses
-sofas
-rugs
-lamps
-wardrobes
-tables
-homeware
-```
-
-The schema should avoid:
-
-```text
-one huge products table with hundreds of nullable type-specific columns
-uncontrolled JSON blobs with weak governance
-```
-
-Recommended approach:
-
-```text
-relational core product tables
-category taxonomy
-category-scoped attribute definitions
-product/variant attribute values
-denormalised Search Service projection for browse/filter/search
-```
-
----
-
-## 4. Expected Migration Files
-
-Recommended initial migrations:
+The current catalog schema is represented by paired up/down migration files:
 
 ```text
 db/catalog/migrations/
 ├── README.md
-├── 000001_create_categories.up.sql
-├── 000001_create_categories.down.sql
-├── 000002_create_products.up.sql
-├── 000002_create_products.down.sql
-├── 000003_create_product_variants.up.sql
-├── 000003_create_product_variants.down.sql
-├── 000004_create_product_attribute_definitions.up.sql
-├── 000004_create_product_attribute_definitions.down.sql
-├── 000005_create_product_attribute_values.up.sql
-├── 000005_create_product_attribute_values.down.sql
-├── 000006_create_product_attribute_options.up.sql
-├── 000006_create_product_attribute_options.down.sql
-├── 000007_create_product_images.up.sql
-├── 000007_create_product_images.down.sql
-├── 000008_create_product_price_history.up.sql
-└── 000008_create_product_price_history.down.sql
+├── 000001_create_catalog_schema.up.sql
+└── 000001_create_catalog_schema.down.sql
 ```
 
-`product_attribute_options`, `product_images`, and `product_price_history` may be deferred if not required for the first implementation.
-
----
-
-## 5. Candidate Tables
-
-Initial priority:
+The initial schema creates the local catalog foundation, including:
 
 ```text
 categories
 products
 product_variants
 product_attribute_definitions
-product_attribute_values
-```
-
-Later:
-
-```text
 product_attribute_options
+product_attribute_values
 product_images
-product_price_history
-product_status_history
-outbox_events
+catalogue_outbox_events
 ```
 
----
+## File naming
 
-## 6. Core Data Ownership
-
-Catalogue Service owns:
+Use paired up/down migration files:
 
 ```text
-product_id
-product name
-product description
-product category
+000001_create_catalog_schema.up.sql
+000001_create_catalog_schema.down.sql
+000002_add_catalog_feature.up.sql
+000002_add_catalog_feature.down.sql
+```
+
+Rules:
+
+```text
+up file applies the change
+down file rolls back the change
+up and down files must be reviewed together
+do not edit migrations that have already been applied outside throwaway local development
+new schema changes should get a new migration version
+```
+
+## Running migrations
+
+From the repo root:
+
+```bash
+make catalog-db-migrate-up
+make catalog-db-migrate-version
+make catalog-db-migrate-down
+```
+
+For local throwaway development, rebuild MySQL and reapply catalog migrations:
+
+```bash
+make local-db-fresh-catalog
+```
+
+If the shared local reset flow should migrate both catalog and basket databases:
+
+```bash
+make local-db-fresh
+```
+
+## Makefile variables
+
+```makefile
+CATALOG_MIGRATIONS_PATH ?= db/catalog/migrations
+CATALOG_DATABASE_URL ?= mysql://bfstore_catalog:bfstore_catalog_password@tcp(localhost:3306)/bfstore_catalog?multiStatements=true&parseTime=true
+```
+
+## Makefile targets
+
+```makefile
+.PHONY: catalog-db-migrate-up
+catalog-db-migrate-up: ## Run catalog-service database migrations
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" up
+
+.PHONY: catalog-db-migrate-down
+catalog-db-migrate-down: ## Roll back one catalog-service database migration
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" down 1
+
+.PHONY: catalog-db-migrate-version
+catalog-db-migrate-version: ## Show catalog-service database migration version
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" version
+
+.PHONY: catalog-db-migrate-force
+catalog-db-migrate-force: ## Force catalog-service migration version. Usage: make catalog-db-migrate-force VERSION=1
+	@if [ -z "$(VERSION)" ]; then \
+		echo "VERSION is required. Example: make catalog-db-migrate-force VERSION=1"; \
+		exit 1; \
+	fi
+	migrate -path $(CATALOG_MIGRATIONS_PATH) -database "$(CATALOG_DATABASE_URL)" force $(VERSION)
+```
+
+## Dirty migrations
+
+If a migration fails, `golang-migrate` may mark the version as dirty.
+
+For local development, prefer:
+
+```text
+read the migration error
+fix the migration
+reset the local database volume
+rerun make local-db-fresh-catalog
+```
+
+Do not use `force` casually. It changes the migration version marker without
+actually applying or rolling back schema changes.
+
+## Boundary rule
+
+Catalog migrations may create and change tables in:
+
+```text
+bfstore_catalog
+```
+
+They must not create, modify, or depend on other service databases.
+
+Catalog may store:
+
+```text
+product identity
+product names and descriptions
 category taxonomy
-product variant metadata
-product active/inactive status
+product variants
 category-scoped attribute definitions
 product attribute values
-catalogue price
+catalog price snapshots
+catalog outbox events
 ```
 
-Catalogue Service does not own:
+Catalog must not store:
 
 ```text
-stock quantity
-stock reservation
 basket contents
-order item history
-search ranking
-recommendation outputs
+stock reservation state
+orders
+payments
+shipments
+search ranking state
+recommendation model state
 ```
 
----
+## Seed data
 
-## 7. Initial Table Design Notes
-
-## 7.1 `categories`
-
-Recommended fields:
+Seed data lives outside the migration history:
 
 ```text
-category_id
-parent_category_id
-name
-slug
-description
-status
-created_at
-updated_at
+db/catalog/seeds/001_seed_borough_products.sql
 ```
 
-Rules:
+Seed scripts are local/demo convenience artefacts. Do not hide schema changes in
+seed files.
 
-```text
-category_id is stable
-slug should be unique where used publicly
-categories define the scope for product attributes
+Local sequence:
+
+```bash
+make local-db-fresh-catalog
+mysql -h 127.0.0.1 -P 3306 -ubfstore_catalog -pbfstore_catalog_password bfstore_catalog < db/catalog/seeds/001_seed_borough_products.sql
 ```
 
-## 7.2 `products`
+## Testing expectations
 
-Recommended fields:
-
-```text
-product_id
-category_id
-name
-description
-status
-base_price_minor
-currency_code
-brand
-created_at
-updated_at
-```
-
-Rules:
-
-```text
-products contain common product data only
-type-specific characteristics belong in product attributes
-only ACTIVE products are purchasable
-```
-
-Avoid columns such as:
-
-```text
-curtain_drop_cm
-bed_size
-bulb_type
-rug_shape
-mattress_firmness
-sofa_orientation
-```
-
-## 7.3 `product_variants`
-
-Recommended fields:
-
-```text
-variant_id
-product_id
-sku
-variant_name
-price_minor
-currency_code
-status
-created_at
-updated_at
-```
-
-Examples:
-
-```text
-curtain width/drop variants
-bed size variants
-sofa fabric variants
-rug size variants
-```
-
-## 7.4 `product_attribute_definitions`
-
-Recommended fields:
-
-```text
-attribute_id
-category_id
-code
-display_name
-description
-data_type
-unit
-is_required
-is_filterable
-is_variant_defining
-allowed_values_json
-display_order
-status
-created_at
-updated_at
-```
-
-Rules:
-
-```text
-attribute codes should be stable
-attribute definitions are scoped to a category
-filterable attributes should be identified for Search Service
-required attributes should be validated by Catalogue Service
-```
-
-Example rows:
-
-| Category | Code | Data Type | Unit | Filterable |
-|---|---|---|---|---|
-| curtains | `drop_cm` | number | cm | yes |
-| curtains | `heading_type` | option | none | yes |
-| bed-frames | `bed_size` | option | none | yes |
-| bed-frames | `storage_type` | option | none | yes |
-| rugs | `shape` | option | none | yes |
-| lamps | `bulb_type` | option | none | yes |
-
-## 7.5 `product_attribute_values`
-
-Recommended fields:
-
-```text
-product_attribute_value_id
-product_id
-variant_id
-attribute_id
-value_string
-value_number
-value_boolean
-value_json
-unit
-created_at
-updated_at
-```
-
-Rules:
-
-```text
-only one typed value column should be populated
-attribute definition determines the expected type
-variant_id is nullable unless the value differs per variant
-```
-
-## 7.6 `product_attribute_options`
-
-Recommended fields:
-
-```text
-attribute_option_id
-attribute_id
-value
-display_name
-display_order
-status
-created_at
-updated_at
-```
-
-This table is useful for controlled values such as:
-
-```text
-single
-double
-king
-super_king
-eyelet
-pencil_pleat
-ottoman
-```
-
-For early implementation, controlled values may temporarily live in `allowed_values_json` if clearly documented.
-
----
-
-## 8. Indexing Guidance
-
-Recommended indexes:
-
-```text
-idx_products_status
-idx_products_category_id
-idx_products_category_status
-idx_product_variants_product_id
-uq_product_variants_sku
-idx_categories_parent_category_id
-uq_categories_slug
-uq_product_attribute_definitions_category_code
-idx_product_attribute_definitions_category_id
-idx_product_attribute_definitions_filterable
-idx_product_attribute_values_product_id
-idx_product_attribute_values_variant_id
-idx_product_attribute_values_attribute_id
-idx_product_attribute_options_attribute_id
-```
-
-Search/filter-heavy browse should eventually use Search Service rather than complex Catalogue SQL queries.
-
----
-
-## 9. Constraints and Invariants
-
-Catalogue migrations should enforce:
-
-```text
-product_id is unique
-variant_id is unique
-sku is unique where required
-amount fields are not negative
-currency_code is present
-product status is present
-category_id is present
-attribute definition code is unique per category
-attribute value references an attribute definition in the catalogue schema
-created_at is present
-```
-
-Catalogue should not create foreign keys into other service schemas.
-
----
-
-## 10. Event and Outbox Considerations
-
-Catalogue Service may publish:
-
-```text
-ProductCreated
-ProductUpdated
-ProductActivated
-ProductDeactivated
-ProductArchived
-CategoryCreated
-CategoryUpdated
-ProductAttributeDefinitionCreated
-ProductAttributeDefinitionUpdated
-ProductAttributeDefinitionDeprecated
-```
-
-If Search Service relies on catalogue events, consider:
-
-```text
-outbox_events
-```
-
-for reliable product event publication.
-
----
-
-## 11. Seed Data
-
-Local seed data should include multiple product types with different attributes.
-
-Examples:
-
-```text
-active curtain product with drop_cm, width_cm, lining, heading_type
-active bed frame with bed_size, material, storage_type, slat_type
-active rug with shape, material, pile_height_cm
-active lamp with bulb_type, wattage, fitting_type
-inactive product
-out-of-stock product reference
-```
-
-Seed data must be fictional and safe for public repositories.
-
----
-
-## 12. Migration Safety Rules
-
-```text
-do not edit migrations after they have been applied
-do not reference other service schemas
-do not store stock in catalogue tables
-do not use FLOAT or DOUBLE for money
-do not add many nullable product-type-specific columns to products
-do not hide all product data in ungoverned JSON
-reserve destructive changes for explicit reviewed migrations
-```
-
----
-
-## 13. Testing Expectations
-
-Catalogue migrations should be validated by tests for:
+Catalog migrations should be validated by tests or local checks for:
 
 ```text
 migrations apply cleanly
+migrations roll back cleanly
+catalog tables exist after migration up
+catalog tables are removed after migration down
 products can be inserted and queried
-inactive products can be filtered out
-money uses minor units
-required constraints are enforced
-attribute definitions can be created per category
-attribute values can be attached to products
-attribute type validation works in service logic
-filterable attributes can be identified for Search Service
-repository queries use indexes where appropriate
+product variants can be validated by product_id and variant_id
+inactive products and variants can be represented
+money is stored in minor units
+catalog tables do not reference other service schemas
 ```
 
----
+## ValidateProductVariant readiness
 
-## 14. Related Documents
+The basket-service `AddItem` flow depends on catalog being able to validate:
 
 ```text
-docs/data/service-database-design.md
-docs/data/mysql-standards.md
-docs/data/migrations.md
-docs/architecture/domain-model.md
-docs/architecture/service-boundaries.md
-docs/requirements/business-rules.md
-proto/acme/catalog/v1/README.md
+product_id
+variant_id
+product/variant ownership
+product status
+variant status
+variant price
+currency
 ```
 
----
+The migration must therefore preserve indexed access to:
 
-## 15. Summary
+```text
+products.product_id
+product_variants.variant_id
+product_variants.product_id
+```
 
-Catalogue migrations define the governed product data model.
+Supporting indexes:
 
-The updated design keeps MySQL as the Catalogue Service source of truth while supporting varied product types through category-scoped attributes.
+```text
+UNIQUE KEY uk_products_product_id (product_id)
+UNIQUE KEY uk_product_variants_variant_id (variant_id)
+KEY idx_product_variants_product_id (product_id)
+```
 
-Search Service should consume catalogue events and maintain denormalised search documents for browse, filters, and facets.
+## Practical rule
+
+Keep catalog migrations boring, reversible, and service-owned.
