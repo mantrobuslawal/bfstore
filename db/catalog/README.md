@@ -1,10 +1,8 @@
-# Catalogue Database
+# Catalog Database
 
-## 1. Purpose
+This directory contains local database artefacts for catalog-service.
 
-This directory contains the local database artefacts for the **Catalogue Service**.
-
-Catalogue Service owns the product catalogue domain for bfstore.
+Catalog Service owns the product catalog domain for bfstore.
 
 It is responsible for:
 
@@ -14,7 +12,7 @@ categories
 product variants
 category-scoped product attributes
 product imagery
-catalogue outbox events
+catalog outbox events
 ```
 
 It is not responsible for:
@@ -29,23 +27,49 @@ search indexes
 recommendation models
 ```
 
----
-
-## 2. Directory Layout
+## Directory layout
 
 ```text
 db/catalog/
 ├── README.md
 ├── migrations/
+│   ├── README.md
 │   ├── 000001_create_catalog_schema.up.sql
 │   └── 000001_create_catalog_schema.down.sql
 └── seeds/
     └── 001_seed_borough_products.sql
 ```
 
----
+## Migration tool
 
-## 3. Design Summary
+Catalog Service uses the same `golang-migrate` approach as Basket Service.
+
+Install:
+
+```bash
+go install -tags 'mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+```
+
+Run catalog migrations from the repo root:
+
+```bash
+make catalog-db-migrate-up
+make catalog-db-migrate-version
+```
+
+Roll back one migration:
+
+```bash
+make catalog-db-migrate-down
+```
+
+Rebuild the local catalog database from scratch:
+
+```bash
+make local-db-fresh-catalog
+```
+
+## Design summary
 
 bfstore sells varied developer-themed homeware.
 
@@ -61,7 +85,7 @@ rugs need shape and pile height
 soft furnishings need fabric type and care instructions
 ```
 
-The catalogue schema uses:
+The catalog schema uses:
 
 ```text
 relational product core
@@ -76,12 +100,10 @@ This avoids:
 ```text
 one giant products table with hundreds of nullable columns
 uncontrolled schemaless JSON blobs
-mixing stock/order/payment data into the catalogue database
+mixing stock/order/payment/basket data into the catalog database
 ```
 
----
-
-## 4. Migration
+## Initial schema migration
 
 Initial schema migration:
 
@@ -108,9 +130,7 @@ product_images
 catalogue_outbox_events
 ```
 
----
-
-## 5. Seed Data
+## Seed data
 
 Seed data:
 
@@ -129,36 +149,26 @@ Dijkstra Pathfinding Rug
 Grace Hopper Debugging Blanket
 ```
 
-The seed data is intentionally memorable, but it exercises serious catalogue modelling concerns.
+Seed data is intentionally memorable, but it exercises serious catalog modelling
+concerns.
 
----
+## ValidateProductVariant dependency
 
-## 6. Event Outbox
+Basket Service now relies on Catalog Service to validate product and variant
+pairs before adding items to a basket.
 
-The `catalogue_outbox_events` table supports reliable event publishing.
-
-Catalogue events should be serialised as Protobuf payloads.
-
-Recommended content type:
+The catalog schema must support efficient lookup by:
 
 ```text
-application/x-protobuf
+products.product_id
+product_variants.variant_id
+product_variants.product_id
 ```
 
-Potential events:
+Catalog remains the owner of product truth. Basket stores a temporary basket-line
+snapshot only.
 
-```text
-ProductCreated
-ProductUpdated
-ProductActivated
-ProductDeactivated
-CategoryUpdated
-ProductAttributeDefinitionUpdated
-```
-
----
-
-## 7. Client-Facing Engineering Evidence
+## Client-facing engineering evidence
 
 This database foundation demonstrates:
 
@@ -167,8 +177,17 @@ service-owned data design
 least-privilege database thinking
 repeatable migrations
 realistic seed data
-catalogue modelling for varied product types
+catalog modelling for varied product types
 event-driven outbox readiness
+cross-service validation without shared database ownership
 ```
 
-This is the bridge from architecture documentation into implementation.
+## Practical rule
+
+Catalog owns product truth.
+
+Basket owns customer intent.
+
+Order revalidates before payment.
+
+
