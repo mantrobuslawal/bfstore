@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -16,11 +17,25 @@ const (
 )
 
 // Service contains Catalog Service business logic.
-type Service struct{ repository Repository }
+type Service struct {
+	repository Repository
+	logger     *slog.Logger
+}
 
 // NewService creates a catalog service.
-func NewService(repository Repository) *Service {
-	return &Service{repository: repository}
+func NewService(repository Repository, logger *slog.Logger) *Service {
+	if repository == nil {
+		panic("catalog: nil repository")
+	}
+
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	return &Service{
+		repository: repository,
+		logger:     logger.With("component", "catalog_service"),
+	}
 }
 
 // CatalogQueryResult represents domain object returned by a catalog service query.
@@ -32,15 +47,15 @@ type CatalogQueryResult interface {
 		ProductAttributeDefinition
 }
 
-// ListCatalogQueryResult represents the combination of a collection of catalog objects
-// and next page token.
+// ListResult represents the combination of a collection of catalog objects and
+// next page token.
 type ListResult[T CatalogQueryResult] struct {
 	Result        []T
 	NextPageToken string
 }
 
-// ListQuery represents the collection of catalog object id (i.e. product id, category id etc),
-// search filter options, max page size and cursor for pagination of catalog results.
+// ListQuery represents the collection of catalog object id, search filter
+// options, max page size and cursor for pagination of catalog results.
 type ListQuery struct {
 	ID            string
 	FilterOptions []bool
@@ -48,7 +63,8 @@ type ListQuery struct {
 	Cursor        *catalogCursor
 }
 
-// catalogCursor represents object encoded to page token string for result pagination.
+// catalogCursor represents object encoded to page token string for result
+// pagination.
 type catalogCursor struct {
 	CreatedAt time.Time `json:"created_at"`
 	ID        string    `json:"id"`
@@ -58,6 +74,10 @@ type catalogCursor struct {
 func (s *Service) ListProducts(ctx context.Context, input ListProductsFilter) (ListResult[Product], error) {
 	pageSize, err := normalisePageSize(input.PageSize)
 	if err != nil {
+		s.logger.WarnContext(ctx, "invalid product list page size",
+			"page_size", input.PageSize,
+		)
+
 		return ListResult[Product]{}, ErrInvalidPageSize
 	}
 
@@ -65,15 +85,20 @@ func (s *Service) ListProducts(ctx context.Context, input ListProductsFilter) (L
 	if strings.TrimSpace(input.PageToken) != "" {
 		cursor, err = decodeCursor(input.PageToken)
 		if err != nil {
-			return ListResult[Product]{}, fmt.Errorf("invalid page token: %w", err)
+			s.logger.WarnContext(ctx, "invalid product list page token",
+				"error", err,
+			)
 
+			return ListResult[Product]{}, fmt.Errorf("invalid page token: %w", err)
 		}
 	}
 
-	var id string
-
-	id, err = isValidCatalogID(input.CategoryID)
+	id, err := isValidCatalogID(input.CategoryID)
 	if err != nil {
+		s.logger.WarnContext(ctx, "invalid product list category id",
+			"category_id", input.CategoryID,
+		)
+
 		return ListResult[Product]{}, ErrInvalidCategoryID
 	}
 
@@ -84,6 +109,12 @@ func (s *Service) ListProducts(ctx context.Context, input ListProductsFilter) (L
 		Cursor:        cursor,
 	})
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to list products",
+			"error", err,
+			"category_id", input.CategoryID,
+			"include_inactive", input.IncludeInactive,
+		)
+
 		return ListResult[Product]{}, fmt.Errorf("list products category id:%q :%w", input.CategoryID, err)
 	}
 
@@ -95,9 +126,20 @@ func (s *Service) ListProducts(ctx context.Context, input ListProductsFilter) (L
 		last := products[len(products)-1]
 		nextToken, err = encodeCursor(last)
 		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to encode products next page token",
+				"error", err,
+				"category_id", input.CategoryID,
+			)
+
 			return ListResult[Product]{}, fmt.Errorf("encode page token: %w", err)
 		}
 	}
+
+	s.logger.DebugContext(ctx, "listed products",
+		"category_id", input.CategoryID,
+		"product_count", len(products),
+		"has_more", hasMore,
+	)
 
 	return ListResult[Product]{
 		Result:        products,
@@ -105,34 +147,150 @@ func (s *Service) ListProducts(ctx context.Context, input ListProductsFilter) (L
 	}, nil
 }
 
-// GetProduct returns a single product, it's variants and attributes.
+// GetProduct returns a single product, its variants and attributes.
 func (s *Service) GetProduct(ctx context.Context, productID ProductID) (ProductDetails, error) {
 	id, err := isValidCatalogID(productID)
-	if err != nil {
+	if err != nil || strings.TrimSpace(id) == "" {
+		s.logger.WarnContext(ctx, "invalid product id",
+			"product_id", productID,
+		)
+
 		return ProductDetails{}, ErrInvalidProductID
 	}
 
 	product, err := s.repository.GetProduct(ctx, ProductID(id))
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to get product",
+			"error", err,
+			"product_id", id,
+		)
+
 		return ProductDetails{}, fmt.Errorf("get product %q: %w", id, err)
 	}
 
 	definitions, err := s.repository.ListProductAttributeDefinitions(ctx, ListQuery{
 		ID:            string(product.CategoryID),
 		FilterOptions: []bool{true, false},
-		Limit:         500, // Magic Number - create ListAllProductAttributeDefinitionForCategory(ctx, catgeoryID)([]ProductAttributeDefinition, error)
+		Limit:         500, // TODO: create ListAllProductAttributeDefinitionsForCategory.
 	})
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to list attribute definitions for product category",
+			"error", err,
+			"product_id", product.ProductID,
+			"category_id", product.CategoryID,
+		)
+
 		return ProductDetails{}, fmt.Errorf("list attribute defintions for category %q: %w", product.CategoryID, err)
 	}
 
 	details, err := hydrateProduct(product, definitions)
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to hydrate product",
+			"error", err,
+			"product_id", product.ProductID,
+		)
+
 		return ProductDetails{}, fmt.Errorf("hydrate product %q: %w", product.ProductID, err)
 	}
 
-	return details, nil
+	s.logger.DebugContext(ctx, "got product details",
+		"product_id", details.ProductID,
+		"variant_count", len(details.Variants),
+		"attribute_count", len(details.Attributes),
+		"image_count", len(details.Images),
+	)
 
+	return details, nil
+}
+
+// ValidateProductVariant validates that a product and variant pairing exists and
+// is currently sellable.
+//
+// Basket Service uses this method before adding a product variant to a basket.
+// The returned snapshot is intentionally small and should not be treated as
+// final order truth.
+func (s *Service) ValidateProductVariant(
+	ctx context.Context,
+	query ValidateProductVariantQuery,
+) (ValidatedProductVariant, error) {
+	productID := strings.TrimSpace(string(query.ProductID))
+	if productID == "" {
+		s.logger.WarnContext(ctx, "validate product variant missing product id",
+			"variant_id", query.VariantID,
+		)
+
+		return ValidatedProductVariant{}, ErrInvalidProductID
+	}
+
+	variantID := strings.TrimSpace(string(query.VariantID))
+	if variantID == "" {
+		s.logger.WarnContext(ctx, "validate product variant missing variant id",
+			"product_id", query.ProductID,
+		)
+
+		return ValidatedProductVariant{}, ErrInvalidVariantID
+	}
+
+	validatedVariant, err := s.repository.ValidateProductVariant(ctx, ValidateProductVariantQuery{
+		ProductID: ProductID(productID),
+		VariantID: VariantID(variantID),
+	})
+	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to validate product variant",
+			"error", err,
+			"product_id", productID,
+			"variant_id", variantID,
+		)
+
+		return ValidatedProductVariant{}, fmt.Errorf("validate product variant product %q variant %q: %w", productID, variantID, err)
+	}
+
+	if string(validatedVariant.ProductStatus) != "active" {
+		s.logger.WarnContext(ctx, "product is not sellable",
+			"product_id", productID,
+			"variant_id", variantID,
+			"product_status", validatedVariant.ProductStatus,
+		)
+
+		return ValidatedProductVariant{}, ErrProductNotSellable
+	}
+
+	if string(validatedVariant.VariantStatus) != "active" {
+		s.logger.WarnContext(ctx, "product variant is not sellable",
+			"product_id", productID,
+			"variant_id", variantID,
+			"variant_status", validatedVariant.VariantStatus,
+		)
+
+		return ValidatedProductVariant{}, ErrProductVariantNotSellable
+	}
+
+	if strings.TrimSpace(validatedVariant.ProductName) == "" {
+		return ValidatedProductVariant{}, fmt.Errorf("validated product variant product %q has empty product name", productID)
+	}
+
+	if strings.TrimSpace(validatedVariant.VariantName) == "" {
+		return ValidatedProductVariant{}, fmt.Errorf("validated product variant %q has empty variant name", variantID)
+	}
+
+	if strings.TrimSpace(validatedVariant.UnitPrice.CurrencyCode) == "" {
+		return ValidatedProductVariant{}, fmt.Errorf("validated product variant %q has empty currency code", variantID)
+	}
+
+	if validatedVariant.UnitPrice.AmountMinor < 0 {
+		return ValidatedProductVariant{}, fmt.Errorf("validated product variant %q has negative unit price", variantID)
+	}
+
+	validatedVariant.Sellable = true
+
+	s.logger.DebugContext(ctx, "validated product variant",
+		"product_id", validatedVariant.ProductID,
+		"variant_id", validatedVariant.VariantID,
+		"currency_code", validatedVariant.UnitPrice.CurrencyCode,
+		"amount_minor", validatedVariant.UnitPrice.AmountMinor,
+	)
+
+	return validatedVariant, nil
 }
 
 func hydrateProduct(product Product, definitions []ProductAttributeDefinition) (ProductDetails, error) {
@@ -157,7 +315,7 @@ func hydrateProduct(product Product, definitions []ProductAttributeDefinition) (
 	}
 
 	for _, value := range product.Attributes {
-		if value.VariantID != nil { // no nil indicates variant product details, ignore to avoid duplication
+		if value.VariantID != nil {
 			continue
 		}
 
@@ -203,7 +361,11 @@ func hydrateProduct(product Product, definitions []ProductAttributeDefinition) (
 
 	return details, nil
 }
-func hydrateProductAttributeValue(value *ProductAttributeValue, definitionsByID map[AttributeID]ProductAttributeDefinition) (*ProductAttributeValueDetails, error) {
+
+func hydrateProductAttributeValue(
+	value *ProductAttributeValue,
+	definitionsByID map[AttributeID]ProductAttributeDefinition,
+) (*ProductAttributeValueDetails, error) {
 	if value == nil {
 		return nil, fmt.Errorf("nil product attribute value")
 	}
@@ -235,11 +397,14 @@ func hydrateProductAttributeValue(value *ProductAttributeValue, definitionsByID 
 	}, nil
 }
 
-// ListCategories returns customer-visible catalogue categories.
+// ListCategories returns customer-visible catalog categories.
 func (s *Service) ListCategories(ctx context.Context, input ListCategoriesFilter) (ListResult[Category], error) {
-
 	pageSize, err := normalisePageSize(input.PageSize)
 	if err != nil {
+		s.logger.WarnContext(ctx, "invalid category list page size",
+			"page_size", input.PageSize,
+		)
+
 		return ListResult[Category]{}, ErrInvalidPageSize
 	}
 
@@ -247,13 +412,20 @@ func (s *Service) ListCategories(ctx context.Context, input ListCategoriesFilter
 	if strings.TrimSpace(input.PageToken) != "" {
 		cursor, err = decodeCursor(input.PageToken)
 		if err != nil {
+			s.logger.WarnContext(ctx, "invalid category list page token",
+				"error", err,
+			)
+
 			return ListResult[Category]{}, fmt.Errorf("invalid page token: %w", err)
 		}
 	}
 
-	var id string
-	id, err = isValidCatalogID(input.ParentCategoryID)
+	id, err := isValidCatalogID(input.ParentCategoryID)
 	if err != nil {
+		s.logger.WarnContext(ctx, "invalid parent category id",
+			"parent_category_id", input.ParentCategoryID,
+		)
+
 		return ListResult[Category]{}, ErrInvalidCategoryID
 	}
 
@@ -264,6 +436,12 @@ func (s *Service) ListCategories(ctx context.Context, input ListCategoriesFilter
 		Cursor:        cursor,
 	})
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to list categories",
+			"error", err,
+			"parent_category_id", input.ParentCategoryID,
+			"include_inactive", input.IncludeInactive,
+		)
+
 		return ListResult[Category]{}, fmt.Errorf("list categories: %w", err)
 	}
 
@@ -275,9 +453,20 @@ func (s *Service) ListCategories(ctx context.Context, input ListCategoriesFilter
 		last := categories[len(categories)-1]
 		nextToken, err = encodeCursor(last)
 		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to encode categories next page token",
+				"error", err,
+				"parent_category_id", input.ParentCategoryID,
+			)
+
 			return ListResult[Category]{}, fmt.Errorf("create next page token: %w", err)
 		}
 	}
+
+	s.logger.DebugContext(ctx, "listed categories",
+		"parent_category_id", input.ParentCategoryID,
+		"category_count", len(categories),
+		"has_more", hasMore,
+	)
 
 	return ListResult[Category]{
 		Result:        categories,
@@ -285,11 +474,18 @@ func (s *Service) ListCategories(ctx context.Context, input ListCategoriesFilter
 	}, nil
 }
 
-// ListProductAttributeDefinitions returns catalogue product attribute definitions.
-func (s *Service) ListProductAttributeDefinitions(ctx context.Context, input ListProductAttributeDefinitionsFilter) (ListResult[ProductAttributeDefinition], error) {
-
+// ListProductAttributeDefinitions returns catalog product attribute definitions.
+func (s *Service) ListProductAttributeDefinitions(
+	ctx context.Context,
+	input ListProductAttributeDefinitionsFilter,
+) (ListResult[ProductAttributeDefinition], error) {
 	pageSize, err := normalisePageSize(input.PageSize)
 	if err != nil {
+		s.logger.WarnContext(ctx, "invalid product attribute definitions page size",
+			"page_size", input.PageSize,
+			"category_id", input.CategoryID,
+		)
+
 		return ListResult[ProductAttributeDefinition]{}, ErrInvalidPageSize
 	}
 
@@ -297,15 +493,24 @@ func (s *Service) ListProductAttributeDefinitions(ctx context.Context, input Lis
 	if strings.TrimSpace(input.PageToken) != "" {
 		cursor, err = decodeCursor(input.PageToken)
 		if err != nil {
+			s.logger.WarnContext(ctx, "invalid product attribute definitions page token",
+				"error", err,
+				"category_id", input.CategoryID,
+			)
+
 			return ListResult[ProductAttributeDefinition]{}, fmt.Errorf("invalid page token: %w", err)
 		}
 	}
 
-	var id string
-	id, err = isValidCatalogID(input.CategoryID)
+	id, err := isValidCatalogID(input.CategoryID)
 	if err != nil {
+		s.logger.WarnContext(ctx, "invalid product attribute definition category id",
+			"category_id", input.CategoryID,
+		)
+
 		return ListResult[ProductAttributeDefinition]{}, ErrInvalidCategoryID
 	}
+
 	attributeDefinitions, err := s.repository.ListProductAttributeDefinitions(ctx, ListQuery{
 		ID:            id,
 		FilterOptions: []bool{input.IncludeInactive, input.IsFilterable},
@@ -313,6 +518,13 @@ func (s *Service) ListProductAttributeDefinitions(ctx context.Context, input Lis
 		Cursor:        cursor,
 	})
 	if err != nil {
+		s.logger.ErrorContext(ctx, "failed to list product attribute definitions",
+			"error", err,
+			"category_id", input.CategoryID,
+			"include_inactive", input.IncludeInactive,
+			"is_filterable", input.IsFilterable,
+		)
+
 		return ListResult[ProductAttributeDefinition]{}, fmt.Errorf("list product attribute definitions: %w", err)
 	}
 
@@ -324,18 +536,28 @@ func (s *Service) ListProductAttributeDefinitions(ctx context.Context, input Lis
 		last := attributeDefinitions[len(attributeDefinitions)-1]
 		nextToken, err = encodeCursor(last)
 		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to encode product attribute definitions next page token",
+				"error", err,
+				"category_id", input.CategoryID,
+			)
+
 			return ListResult[ProductAttributeDefinition]{}, fmt.Errorf("create next page token: %w", err)
 		}
 	}
+
+	s.logger.DebugContext(ctx, "listed product attribute definitions",
+		"category_id", input.CategoryID,
+		"attribute_definition_count", len(attributeDefinitions),
+		"has_more", hasMore,
+	)
 
 	return ListResult[ProductAttributeDefinition]{
 		Result:        attributeDefinitions,
 		NextPageToken: nextToken,
 	}, nil
-
 }
 
-// Helper functions for PageSize and PageToken
+// Helper functions for PageSize and PageToken.
 
 func normalisePageSize(size int) (int, error) {
 	if size <= 0 {
@@ -373,6 +595,7 @@ func decodeCursor(pageToken string) (*catalogCursor, error) {
 
 func encodeCursor[T CatalogQueryResult](c T) (string, error) {
 	var token catalogCursor
+
 	product, ok := any(c).(Product)
 	if ok {
 		token.CreatedAt = product.CreatedAt
@@ -399,7 +622,7 @@ func encodeCursor[T CatalogQueryResult](c T) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(data), nil
 }
 
-// TODO: Implement proper validation
+// TODO: Implement proper validation.
 func isValidCatalogID[T CatalogID](id T) (string, error) {
-	return string(id), nil
+	return strings.TrimSpace(string(id)), nil
 }
