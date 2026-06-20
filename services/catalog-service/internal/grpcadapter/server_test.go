@@ -12,7 +12,7 @@ import (
 func TestNewServerRegistersCatalogService(t *testing.T) {
 	t.Parallel()
 
-	server, err := NewServer(new(catalog.Service), testLogger())
+	server, err := NewServer(new(catalog.Service), servertestLogger())
 	if err != nil {
 		t.Fatalf("NewServer() error = %v, want nil", err)
 	}
@@ -60,6 +60,6 @@ func assertRegisteredMethod(
 	t.Fatalf("registered methods = %#v, want method %q", methods, wantName)
 }
 
-func testLogger() *slog.Logger {
+func servertestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
