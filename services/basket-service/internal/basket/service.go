@@ -8,15 +8,23 @@ import (
 	"strings"
 )
 
-// Service contains Basket business logic.
+// Service contains Basket Service business logic.
 type Service struct {
 	repository    Repository
-	catalogClient CatalogGRPCClient
+	catalogClient CatalogClient
 	logger        *slog.Logger
 }
 
-// NewService creates a Basket Service
-func NewService(repository Repository, catalogClient CatalogGRPCClient, logger *slog.Logger) *Service {
+// NewService creates a Basket Service.
+func NewService(repository Repository, catalogClient CatalogClient, logger *slog.Logger) *Service {
+	if repository == nil {
+		panic("basket: nil repository")
+	}
+
+	if catalogClient == nil {
+		panic("basket: nil catalog client")
+	}
+
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -24,189 +32,248 @@ func NewService(repository Repository, catalogClient CatalogGRPCClient, logger *
 	return &Service{
 		repository:    repository,
 		catalogClient: catalogClient,
-		logger:        logger,
+		logger:        logger.With("component", "basket_service"),
 	}
 }
 
-// CreateBasket creates an empty basket and returns its basket id.
+// CreateBasket creates an empty basket and returns it.
 func (s *Service) CreateBasket(ctx context.Context, query BasketQuery) (Basket, error) {
-	code := query.CurrencyCode
-	defaultCurrencySet, currencyIsInValid := validateCurrency(code)
+	currencyCode, defaultCurrencySet, err := NormaliseCurrencyCode(query.CurrencyCode)
+	if err != nil {
+		s.logger.DebugContext(ctx, "invalid basket currency code",
+			"currency_code", query.CurrencyCode,
+		)
 
-	if currencyIsInValid {
-		s.logger.DebugContext(ctx, "invalid basket currency code", "invalid_currency_code", code)
-		return Basket{}, ErrInvalidCurrenyCode
+		return Basket{}, ErrInvalidCurrencyCode
 	}
 
 	if defaultCurrencySet {
 		s.logger.DebugContext(ctx, "basket currency defaulted",
-			"default_currency_code", code)
+			"default_currency_code", currencyCode,
+		)
 	}
 
 	id, err := NewBasketID()
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to generate new basket id", "error", err)
+		s.logger.ErrorContext(ctx, "failed to generate new basket id",
+			"error", err,
+		)
+
 		return Basket{}, fmt.Errorf("generate new basket id: %w", err)
 	}
 
 	basket := Basket{
-		BasketID:    BasketID(id),
-		Status:      BasketStatusActive,
-		Subtotal:    Money{CurrencyCode: CurrencyCode(code)},
+		BasketID: BasketID(id),
+		Status:   BasketStatusActive,
+		Subtotal: Money{
+			CurrencyCode: currencyCode,
+		},
 		BasketItems: nil,
 	}
 
 	created, err := s.repository.CreateBasket(ctx, basket)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to create new basket",
+		s.logger.ErrorContext(ctx, "failed to create basket",
 			"error", err,
 			"basket_id", basket.BasketID,
-			"currency_code", code)
-		return Basket{}, fmt.Errorf("persist newly created basket: %w", err)
+			"currency_code", currencyCode,
+		)
+
+		return Basket{}, fmt.Errorf("create basket: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "basket created",
 		"basket_id", created.BasketID,
 		"currency_code", created.Subtotal.CurrencyCode,
-		"status", created.Status)
+		"status", created.Status,
+	)
 
 	return created, nil
 }
 
-// GetBasket takes a basket id and returns the assosicated basket.
+// GetBasket returns an existing basket.
 func (s *Service) GetBasket(ctx context.Context, query BasketQuery) (Basket, error) {
-	basketId := query.BasketID
-	err := basketIdCheck(basketId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidBasketID):
-			s.logger.ErrorContext(ctx, "invalid basket_id", "error", ErrInvalidBasketID, "basket_id", basketId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_id", "error", err, "basket_id", basketId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
+	basketID := strings.TrimSpace(query.BasketID)
+	if err := basketIDCheck(basketID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket id",
+			"error", err,
+			"basket_id", query.BasketID,
+		)
+
+		return Basket{}, ErrInvalidBasketID
 	}
 
-	basket, err := s.repository.GetBasket(ctx, basketId)
+	basket, err := s.repository.GetBasket(ctx, basketID)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to get basket", "basket_id", basketId, "error", err)
+		if errors.Is(err, ErrBasketNotFound) {
+			s.logger.DebugContext(ctx, "basket not found",
+				"basket_id", basketID,
+			)
+
+			return Basket{}, ErrBasketNotFound
+		}
+
+		s.logger.ErrorContext(ctx, "failed to get basket",
+			"basket_id", basketID,
+			"error", err,
+		)
+
 		return Basket{}, fmt.Errorf("get basket: %w", err)
 	}
 
-	s.logger.InfoContext(ctx, "basket retrieved", "basket_id", basket.BasketID, "currency_code", string(basket.Subtotal.CurrencyCode), "status", string(basket.Status))
+	s.logger.DebugContext(ctx, "basket retrieved",
+		"basket_id", basket.BasketID,
+		"currency_code", basket.Subtotal.CurrencyCode,
+		"status", basket.Status,
+		"item_count", len(basket.BasketItems),
+	)
+
 	return basket, nil
 }
 
 // AddItem adds a line item to an existing basket.
+//
+// If the same product/variant pair already exists, the repository increases the
+// existing quantity.
 func (s *Service) AddItem(ctx context.Context, query BasketQuery) (Basket, error) {
-	// check basket id
-	basketId := query.BasketID
-	err := basketIdCheck(basketId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidBasketID):
-			s.logger.ErrorContext(ctx, "invalid basket_id", "error", ErrInvalidBasketID, "basket_id", basketId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_id", "error", err, "basket_id", basketId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
+	basketID := strings.TrimSpace(query.BasketID)
+	if err := basketIDCheck(basketID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket id for add item",
+			"error", err,
+			"basket_id", query.BasketID,
+		)
+
+		return Basket{}, ErrInvalidBasketID
 	}
 
-	// check quantity
-	quantity := query.Quantity
-	err = validateQuantity(quantity)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "invalid basket item quantity", "error", ErrInvalidQuantity, "quantity", quantity)
+	productID := strings.TrimSpace(query.ProductID)
+	if productID == "" {
+		s.logger.DebugContext(ctx, "missing product id for add item",
+			"basket_id", basketID,
+		)
+
+		return Basket{}, ErrMissingProductID
+	}
+
+	variantID := strings.TrimSpace(query.VariantID)
+	if variantID == "" {
+		s.logger.DebugContext(ctx, "missing variant id for add item",
+			"basket_id", basketID,
+			"product_id", productID,
+		)
+
+		return Basket{}, ErrMissingVariantID
+	}
+
+	if err := validateQuantity(query.Quantity); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket item quantity",
+			"error", err,
+			"basket_id", basketID,
+			"product_id", productID,
+			"variant_id", variantID,
+			"quantity", query.Quantity,
+		)
+
 		return Basket{}, ErrInvalidQuantity
 	}
 
-	// get basket
-	currentBasket, err := s.repository.GetBasket(ctx, basketId)
+	currentBasket, err := s.repository.GetBasket(ctx, basketID)
 	if err != nil {
-
 		if errors.Is(err, ErrBasketNotFound) {
 			s.logger.DebugContext(ctx, "add item rejected because basket was not found",
-				"basket_id", basketId)
+				"basket_id", basketID,
+			)
+
 			return Basket{}, ErrBasketNotFound
 		}
 
-		s.logger.ErrorContext(ctx, "failed to load basket before adding item", "basket_id", basketId, "error", err)
+		s.logger.ErrorContext(ctx, "failed to load basket before adding item",
+			"basket_id", basketID,
+			"error", err,
+		)
+
 		return Basket{}, fmt.Errorf("load basket before adding item: %w", err)
 	}
-	s.logger.InfoContext(ctx, "basket retrieved",
-		"basket_id", currentBasket.BasketID,
-		"currency_code", string(currentBasket.Subtotal.CurrencyCode),
-		"status", currentBasket.Status)
 
-	// validate basket status
 	if currentBasket.Status != BasketStatusActive {
 		s.logger.WarnContext(ctx, "add item rejected because basket is not modifiable",
 			"basket_id", currentBasket.BasketID,
 			"status", currentBasket.Status,
-			"prouduct_id", query.ProductID,
-			"variant_id", query.VariantID)
+			"product_id", productID,
+			"variant_id", variantID,
+		)
 
 		return Basket{}, ErrBasketNotModifiable
 	}
 
-	// verify product id & variant id
+	if existingItem, found := currentBasket.ExistingItem(productID, variantID); found {
+		newQuantity := existingItem.Quantity + query.Quantity
+		if err := validateQuantity(newQuantity); err != nil {
+			s.logger.DebugContext(ctx, "add item rejected because combined quantity is invalid",
+				"basket_id", basketID,
+				"basket_item_id", existingItem.BasketItemID,
+				"product_id", productID,
+				"variant_id", variantID,
+				"existing_quantity", existingItem.Quantity,
+				"add_quantity", query.Quantity,
+				"combined_quantity", newQuantity,
+			)
+
+			return Basket{}, ErrInvalidQuantity
+		}
+	}
+
 	catalogItem, err := s.catalogClient.ValidateProductVariant(ctx, ValidateProductVariantQuery{
-		ProductID: query.ProductID,
-		VariantID: query.VariantID,
+		ProductID: productID,
+		VariantID: variantID,
 	})
-
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrProductNotFound),
-			errors.Is(err, ErrVariantNotFound),
-			errors.Is(err, ErrProductVariantMismatch),
-			errors.Is(err, ErrProductNotSellable):
-
+		if isExpectedCatalogValidationFailure(err) || errors.Is(err, ErrCatalogServiceUnavailable) {
 			s.logger.DebugContext(ctx, "add item rejected by catalog validation",
 				"error", err,
-				"basket_id", basketId,
-				"product_id", query.ProductID,
-				"variant_id", query.VariantID,
+				"basket_id", basketID,
+				"product_id", productID,
+				"variant_id", variantID,
 			)
-			return Basket{}, err
 
-		default:
-			s.logger.ErrorContext(ctx, "add item rejected because catalog item is not sellable",
-				"basket_id", query.BasketID,
-				"product_id", query.ProductID,
-				"variant_id", query.VariantID,
-			)
-			return Basket{}, ErrProductNotSellable
+			return Basket{}, err
 		}
+
+		s.logger.ErrorContext(ctx, "failed to validate catalog product variant",
+			"error", err,
+			"basket_id", basketID,
+			"product_id", productID,
+			"variant_id", variantID,
+		)
+
+		return Basket{}, fmt.Errorf("validate catalog product variant: %w", err)
 	}
 
 	if !catalogItem.Sellable {
 		s.logger.WarnContext(ctx, "add item rejected because catalog item is not sellable",
-			"basket_id", query.BasketID,
-			"product_id", query.ProductID,
-			"variant_id", query.VariantID,
+			"basket_id", basketID,
+			"product_id", productID,
+			"variant_id", variantID,
 		)
 
 		return Basket{}, ErrProductNotSellable
 	}
 
 	updatedBasket, err := s.repository.AddItem(ctx, AddValidatedItemCommand{
-		BasketID:            query.BasketID,
+		BasketID:            basketID,
 		ProductID:           catalogItem.ProductID,
 		VariantID:           catalogItem.VariantID,
-		ProductNameSnapShot: catalogItem.ProductName,
-		VariantNameSnapShot: catalogItem.VariantName,
-		Quantity:            int32(query.Quantity),
+		ProductNameSnapshot: catalogItem.ProductName,
+		VariantNameSnapshot: catalogItem.VariantName,
+		Quantity:            query.Quantity,
 		UnitPrice:           catalogItem.UnitPrice,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to add item to basket",
 			"error", err,
-			"basket_id", query.BasketID,
-			"product_id", query.ProductID,
-			"varianr_id", query.VariantID,
+			"basket_id", basketID,
+			"product_id", productID,
+			"variant_id", variantID,
 			"quantity", query.Quantity,
 		)
 
@@ -214,9 +281,9 @@ func (s *Service) AddItem(ctx context.Context, query BasketQuery) (Basket, error
 	}
 
 	s.logger.InfoContext(ctx, "basket item added",
-		"basket_id", query.BasketID,
-		"product_id", query.ProductID,
-		"varianr_id", query.VariantID,
+		"basket_id", basketID,
+		"product_id", productID,
+		"variant_id", variantID,
 		"quantity", query.Quantity,
 		"item_count", len(updatedBasket.BasketItems),
 		"currency_code", catalogItem.UnitPrice.CurrencyCode,
@@ -225,72 +292,69 @@ func (s *Service) AddItem(ctx context.Context, query BasketQuery) (Basket, error
 	return updatedBasket, nil
 }
 
-// UpdateItemQuantity updates the Quantity field of a bask item within a
-// basket and returns the updated basket.
+// UpdateItemQuantity replaces the quantity of an existing basket item.
 func (s *Service) UpdateItemQuantity(ctx context.Context, query BasketQuery) (Basket, error) {
-	// check basket id
-	basketId := query.BasketID
-	err := basketIdCheck(basketId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidBasketID):
-			s.logger.ErrorContext(ctx, "invalid basket_id", "error", ErrInvalidBasketID, "basket_id", basketId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_id", "error", err, "basket_id", basketId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
+	basketID := strings.TrimSpace(query.BasketID)
+	if err := basketIDCheck(basketID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket id for update item quantity",
+			"error", err,
+			"basket_id", query.BasketID,
+		)
+
+		return Basket{}, ErrInvalidBasketID
 	}
 
-	// check basket item id
-	basketItemId := query.BasketItemID
-	err = basketItemIdCheck(basketItemId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidItemID):
-			s.logger.ErrorContext(ctx, "invalid basket_item_id",
-				"error", ErrInvalidItemID,
-				"basket_id", basketId,
-				"basket_item_id", basketItemId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_item_id", "error", err,
-				"basket_id", basketId,
-				"basket_item_id", basketItemId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
+	basketItemID := strings.TrimSpace(query.BasketItemID)
+	if err := basketItemIDCheck(basketItemID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket item id for update item quantity",
+			"error", err,
+			"basket_id", basketID,
+			"basket_item_id", query.BasketItemID,
+		)
+
+		return Basket{}, ErrInvalidItemID
 	}
 
-	// check quantity
-	quantity := query.Quantity
-	err = validateQuantity(quantity)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "invalid basket item quantity",
-			"error", ErrInvalidQuantity,
-			"quantity", quantity)
+	if err := validateQuantity(query.Quantity); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket item quantity",
+			"error", err,
+			"basket_id", basketID,
+			"basket_item_id", basketItemID,
+			"quantity", query.Quantity,
+		)
+
 		return Basket{}, ErrInvalidQuantity
 	}
 
-	updatedBasket, err := s.UpdateItemQuantity(ctx, BasketQuery{
-		BasketID:     basketId,
-		BasketItemID: basketItemId,
-		Quantity:     quantity,
+	updatedBasket, err := s.repository.UpdateItemQuantity(ctx, UpdateItemQuantityCommand{
+		BasketID:     basketID,
+		BasketItemID: basketItemID,
+		Quantity:     query.Quantity,
 	})
-
 	if err != nil {
+		if errors.Is(err, ErrBasketNotFound) || errors.Is(err, ErrBasketItemNotFound) {
+			s.logger.DebugContext(ctx, "update item quantity target not found",
+				"error", err,
+				"basket_id", basketID,
+				"basket_item_id", basketItemID,
+			)
+
+			return Basket{}, err
+		}
+
 		s.logger.ErrorContext(ctx, "failed to update basket item quantity",
 			"error", err,
-			"basket_id", query.BasketID,
-			"basket_item_id", query.BasketItemID,
+			"basket_id", basketID,
+			"basket_item_id", basketItemID,
 			"quantity", query.Quantity,
 		)
 
 		return Basket{}, fmt.Errorf("update basket item quantity: %w", err)
 	}
 
-	s.logger.InfoContext(ctx, "basket item added",
-		"basket_id", query.BasketID,
-		"basket_item_id", query.BasketItemID,
+	s.logger.InfoContext(ctx, "basket item quantity updated",
+		"basket_id", basketID,
+		"basket_item_id", basketItemID,
 		"quantity", query.Quantity,
 		"item_count", len(updatedBasket.BasketItems),
 		"currency_code", updatedBasket.Subtotal.CurrencyCode,
@@ -299,60 +363,56 @@ func (s *Service) UpdateItemQuantity(ctx context.Context, query BasketQuery) (Ba
 	return updatedBasket, nil
 }
 
-// RemoveItem removes a basket item from an existing basket and returns
-// the basket.
+// RemoveItem removes a basket item from an existing basket.
 func (s *Service) RemoveItem(ctx context.Context, query BasketQuery) (Basket, error) {
-	// check basket id
-	basketId := query.BasketID
-	err := basketIdCheck(basketId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidBasketID):
-			s.logger.ErrorContext(ctx, "invalid basket_id", "error", ErrInvalidBasketID, "basket_id", basketId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_id", "error", err, "basket_id", basketId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
-	}
-
-	// check basket item id
-	basketItemId := query.BasketItemID
-	err = basketItemIdCheck(basketItemId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidItemID):
-			s.logger.ErrorContext(ctx, "invalid basket_item_id",
-				"error", ErrInvalidItemID,
-				"basket_id", basketId,
-				"basket_item_id", basketItemId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_item_id", "error", err,
-				"basket_id", basketId,
-				"basket_item_id", basketItemId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
-	}
-
-	updatedBasket, err := s.repository.RemoveItem(ctx, BasketQuery{
-		BasketID:     basketId,
-		BasketItemID: basketItemId,
-	})
-
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to remove basket item",
+	basketID := strings.TrimSpace(query.BasketID)
+	if err := basketIDCheck(basketID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket id for remove item",
 			"error", err,
 			"basket_id", query.BasketID,
+		)
+
+		return Basket{}, ErrInvalidBasketID
+	}
+
+	basketItemID := strings.TrimSpace(query.BasketItemID)
+	if err := basketItemIDCheck(basketItemID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket item id for remove item",
+			"error", err,
+			"basket_id", basketID,
 			"basket_item_id", query.BasketItemID,
+		)
+
+		return Basket{}, ErrInvalidItemID
+	}
+
+	updatedBasket, err := s.repository.RemoveItem(ctx, RemoveItemCommand{
+		BasketID:     basketID,
+		BasketItemID: basketItemID,
+	})
+	if err != nil {
+		if errors.Is(err, ErrBasketNotFound) || errors.Is(err, ErrBasketItemNotFound) {
+			s.logger.DebugContext(ctx, "remove item target not found",
+				"error", err,
+				"basket_id", basketID,
+				"basket_item_id", basketItemID,
+			)
+
+			return Basket{}, err
+		}
+
+		s.logger.ErrorContext(ctx, "failed to remove basket item",
+			"error", err,
+			"basket_id", basketID,
+			"basket_item_id", basketItemID,
 		)
 
 		return Basket{}, fmt.Errorf("remove basket item: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "basket item removed",
-		"basket_id", query.BasketID,
-		"basket_item_id", query.BasketItemID,
+		"basket_id", basketID,
+		"basket_item_id", basketItemID,
 		"item_count", len(updatedBasket.BasketItems),
 		"currency_code", updatedBasket.Subtotal.CurrencyCode,
 	)
@@ -360,35 +420,39 @@ func (s *Service) RemoveItem(ctx context.Context, query BasketQuery) (Basket, er
 	return updatedBasket, nil
 }
 
-// ClearBasket clears all basket items from an existing basket
-// and returns the basket.
+// ClearBasket clears all basket items from an existing basket and returns the
+// active empty basket.
 func (s *Service) ClearBasket(ctx context.Context, query BasketQuery) (Basket, error) {
-	// check basket id
-	basketId := query.BasketID
-	err := basketIdCheck(basketId)
-	if err != nil {
-		switch {
-		case errors.Is(err, ErrInvalidBasketID):
-			s.logger.ErrorContext(ctx, "invalid basket_id", "error", ErrInvalidBasketID, "basket_id", basketId)
-			return Basket{}, ErrInvalidBasketID
-		default:
-			s.logger.ErrorContext(ctx, "failed to validate basket_id", "error", err, "basket_id", basketId)
-			return Basket{}, fmt.Errorf("validate basket id: %w", err)
-		}
-	}
-
-	updatedBasket, err := s.repository.ClearBasket(ctx, BasketQuery{BasketID: basketId})
-	if err != nil {
-		s.logger.ErrorContext(ctx, "failed to clear basket",
+	basketID := strings.TrimSpace(query.BasketID)
+	if err := basketIDCheck(basketID); err != nil {
+		s.logger.DebugContext(ctx, "invalid basket id for clear basket",
 			"error", err,
 			"basket_id", query.BasketID,
+		)
+
+		return Basket{}, ErrInvalidBasketID
+	}
+
+	updatedBasket, err := s.repository.ClearBasket(ctx, ClearBasketCommand{BasketID: basketID})
+	if err != nil {
+		if errors.Is(err, ErrBasketNotFound) {
+			s.logger.DebugContext(ctx, "clear basket target not found",
+				"basket_id", basketID,
+			)
+
+			return Basket{}, ErrBasketNotFound
+		}
+
+		s.logger.ErrorContext(ctx, "failed to clear basket",
+			"error", err,
+			"basket_id", basketID,
 		)
 
 		return Basket{}, fmt.Errorf("clear basket: %w", err)
 	}
 
 	s.logger.InfoContext(ctx, "basket cleared",
-		"basket_id", query.BasketID,
+		"basket_id", basketID,
 		"basket_status", updatedBasket.Status,
 		"currency_code", updatedBasket.Subtotal.CurrencyCode,
 	)
@@ -397,42 +461,33 @@ func (s *Service) ClearBasket(ctx context.Context, query BasketQuery) (Basket, e
 }
 
 func validateQuantity(quantity int) error {
-	if (quantity < minBasketQuantity) || (quantity > maxBasketQuantity) {
+	if quantity < minBasketQuantity || quantity > maxBasketQuantity {
 		return ErrInvalidQuantity
 	}
+
 	return nil
 }
 
-func validateCurrency(code string) (bool, bool) {
-	currencyCode := CurrencyCode(code)
-	currencyIsValid, defaultCurrencySet := currencyCode.isValid()
-	if !currencyIsValid {
-		return false, true // default curreny code NOT used and invalid currency code
-	}
-	if defaultCurrencySet {
-		return true, false // default currency code used and NO invalid currency code
-	}
-	return false, false // default currency code NOT used and NO invalid currency code
-}
-
-func basketIdCheck(basketId string) error {
-	if strings.TrimSpace(basketId) == "" {
+func basketIDCheck(basketID string) error {
+	if strings.TrimSpace(basketID) == "" {
 		return ErrInvalidBasketID
 	}
-	err := ValidateBasketID(basketId)
-	if err != nil {
+
+	if err := ValidateBasketID(basketID); err != nil {
 		return fmt.Errorf("validate basket id: %w", err)
 	}
+
 	return nil
 }
 
-func basketItemIdCheck(basketItemId string) error {
-	if strings.TrimSpace(basketItemId) == "" {
-		return ErrInvalidBasketID
+func basketItemIDCheck(basketItemID string) error {
+	if strings.TrimSpace(basketItemID) == "" {
+		return ErrInvalidItemID
 	}
-	err := ValidateBasketItemID(basketItemId)
-	if err != nil {
+
+	if err := ValidateBasketItemID(basketItemID); err != nil {
 		return fmt.Errorf("validate basket item id: %w", err)
 	}
+
 	return nil
 }
