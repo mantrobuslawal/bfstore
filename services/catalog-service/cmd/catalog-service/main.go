@@ -83,8 +83,14 @@ func main() {
 
 	}
 
-	repository := catalog.NewMySQLRepository(db)
-	service := catalog.NewService(repository)
+	repository := catalog.NewMySQLRepository(db, logger.With(
+		"service", "catalog_service",
+		"component", "catalog_repository",
+	))
+	service := catalog.NewService(repository, logger.With(
+		"service", "catalog_service",
+		"component", "catalog_service",
+	))
 	grpcServer, err := cataloggrpc.NewServer(service, logger)
 	if err != nil {
 		logger.Error("failed to setup requestmetrics interceptor", "error", err)

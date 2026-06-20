@@ -86,8 +86,8 @@ func main() {
 	}
 
 	repository := basket.NewMySQLRepository(db, logger.With(
-		"service", "basket-service",
-		"component", "basket-repository",
+		"service", "basket_service",
+		"component", "basket_repository",
 	))
 
 	catalogConn, err := grpc.NewClient(
@@ -106,7 +106,7 @@ func main() {
 	catalogClient := basket.NewCatalogGRPCClient(
 		catalogv1.NewCatalogServiceClient(catalogConn),
 		logger.With(
-			"service", "basket-service",
+			"service", "basket_service",
 			"component", "catalog_grpc_client",
 		),
 		cfg.CatalogRequestTimeout,
@@ -116,8 +116,8 @@ func main() {
 		repository,
 		*catalogClient,
 		logger.With(
-			"service", "basket-service",
-			"component", "catalog_grpc_client",
+			"service", "basket_service",
+			"component", "basket_service",
 		),
 	)
 
