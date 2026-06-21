@@ -1,26 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# bfstore browse -> basket smoke test
+# bfstore browse -> basket smoke test v2
 #
 # Purpose:
 #   Exercise the current two-service local flow:
 #     Catalog Service -> Basket Service
 #
-# What it checks:
-#   - containers are visible to Docker Compose
-#   - catalog and basket gRPC reflection/health respond
-#   - catalog database can be seeded
-#   - catalog list/get/validate endpoints work
-#   - basket create/get/add/update/remove/clear endpoints work
-#
 # Requirements on the host:
-#   docker
-#   docker compose
-#   make
-#   mysql client
-#   grpcurl
-#   jq
+#   docker, docker compose, make, mysql client, grpcurl, jq
 
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-bfstore}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yaml}"
@@ -42,6 +30,10 @@ RUN_SEED="${RUN_SEED:-true}"
 
 PRODUCT_ID="${PRODUCT_ID:-}"
 VARIANT_ID="${VARIANT_ID:-}"
+
+# grpcurl/protojson output can appear as lowerCamelCase or snake_case depending
+# on flags and generated descriptors. This expression deliberately supports both.
+BASKET_ITEMS_JQ='(.basket.basketItems // .basket.basket_items // [])'
 
 require_command() {
   local command_name="$1"
@@ -86,7 +78,7 @@ extract_basket_id() {
 }
 
 extract_first_basket_item_id() {
-  jq -er '.basket.basketItems[0].basketItemId // .basket.basket_items[0].basket_item_id'
+  jq -er '((.basket.basketItems // .basket.basket_items)[0].basketItemId // (.basket.basketItems // .basket.basket_items)[0].basket_item_id)'
 }
 
 assert_json_equals() {
@@ -123,6 +115,29 @@ assert_json_number_gte() {
     echo "${json}" | jq . >&2
     exit 1
   fi
+}
+
+assert_basket_item_count() {
+  local json="$1"
+  local expected="$2"
+
+  assert_json_equals "${json}" "${BASKET_ITEMS_JQ} | length" "${expected}"
+}
+
+assert_first_basket_item_quantity() {
+  local json="$1"
+  local expected="$2"
+
+  assert_json_equals "${json}" "${BASKET_ITEMS_JQ}[0].quantity" "${expected}"
+}
+
+assert_first_basket_item_product_and_variant() {
+  local json="$1"
+  local expected_product_id="$2"
+  local expected_variant_id="$3"
+
+  assert_json_equals "${json}" "${BASKET_ITEMS_JQ}[0].productId // ${BASKET_ITEMS_JQ}[0].product_id" "${expected_product_id}"
+  assert_json_equals "${json}" "${BASKET_ITEMS_JQ}[0].variantId // ${BASKET_ITEMS_JQ}[0].variant_id" "${expected_variant_id}"
 }
 
 section "Preflight"
@@ -312,6 +327,7 @@ get_basket_response="$(
 )"
 echo "${get_basket_response}" | jq .
 assert_json_equals "${get_basket_response}" '.basket.basketId // .basket.basket_id' "${BASKET_ID}"
+assert_basket_item_count "${get_basket_response}" "0"
 
 step "Basket AddItem quantity 2"
 add_item_response="$(
@@ -321,7 +337,12 @@ add_item_response="$(
     bfstore.basket.v1.BasketService/AddItem
 )"
 echo "${add_item_response}" | jq .
-assert_json_number_gte "${add_item_response}" '.basket.basketItems | length' 1
+
+# Adding quantity 2 of the same product/variant should create one basket item
+# with quantity 2, not two separate basket items.
+assert_basket_item_count "${add_item_response}" "1"
+assert_first_basket_item_quantity "${add_item_response}" "2"
+assert_first_basket_item_product_and_variant "${add_item_response}" "${PRODUCT_ID}" "${VARIANT_ID}"
 
 BASKET_ITEM_ID="$(extract_first_basket_item_id <<<"${add_item_response}")"
 echo "BASKET_ITEM_ID=${BASKET_ITEM_ID}"
@@ -334,7 +355,8 @@ update_item_response="$(
     bfstore.basket.v1.BasketService/UpdateItemQuantity
 )"
 echo "${update_item_response}" | jq .
-assert_json_equals "${update_item_response}" '.basket.basketItems[0].quantity // .basket.basket_items[0].quantity' "3"
+assert_basket_item_count "${update_item_response}" "1"
+assert_first_basket_item_quantity "${update_item_response}" "3"
 
 step "Basket RemoveItem"
 remove_item_response="$(
@@ -344,7 +366,7 @@ remove_item_response="$(
     bfstore.basket.v1.BasketService/RemoveItem
 )"
 echo "${remove_item_response}" | jq .
-assert_json_equals "${remove_item_response}" '(.basket.basketItems // .basket.basket_items // []) | length' "0"
+assert_basket_item_count "${remove_item_response}" "0"
 
 step "Basket AddItem again quantity 1 before ClearBasket"
 add_again_response="$(
@@ -354,7 +376,12 @@ add_again_response="$(
     bfstore.basket.v1.BasketService/AddItem
 )"
 echo "${add_again_response}" | jq .
-assert_json_number_gte "${add_again_response}" '.basket.basketItems | length' 1
+assert_basket_item_count "${add_again_response}" "1"
+assert_first_basket_item_quantity "${add_again_response}" "1"
+assert_first_basket_item_product_and_variant "${add_again_response}" "${PRODUCT_ID}" "${VARIANT_ID}"
+
+BASKET_ITEM_ID="$(extract_first_basket_item_id <<<"${add_again_response}")"
+echo "BASKET_ITEM_ID_AFTER_ADD_AGAIN=${BASKET_ITEM_ID}"
 
 step "Basket ClearBasket"
 clear_basket_response="$(
@@ -364,7 +391,7 @@ clear_basket_response="$(
     bfstore.basket.v1.BasketService/ClearBasket
 )"
 echo "${clear_basket_response}" | jq .
-assert_json_equals "${clear_basket_response}" '(.basket.basketItems // .basket.basket_items // []) | length' "0"
+assert_basket_item_count "${clear_basket_response}" "0"
 
 step "Basket GetBasket after clear"
 get_after_clear_response="$(
@@ -374,7 +401,7 @@ get_after_clear_response="$(
     bfstore.basket.v1.BasketService/GetBasket
 )"
 echo "${get_after_clear_response}" | jq .
-assert_json_equals "${get_after_clear_response}" '(.basket.basketItems // .basket.basket_items // []) | length' "0"
+assert_basket_item_count "${get_after_clear_response}" "0"
 
 section "Smoke test complete"
 
