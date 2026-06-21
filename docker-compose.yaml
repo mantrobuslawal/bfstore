@@ -12,104 +12,99 @@ services:
     networks:
       - bfstore
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-pbfstore_root_password"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-uroot",
+          "-pbfstore_root_password"
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  kafka:
-    image: apache/kafka:4.1.2
-    container_name: bfstore-kafka
-    restart: unless-stopped
-    environment:
-      # KRaft single-node local development broker.
-      #
-      # This is suitable for local bfstore development only.
-      # Production Kafka should be deployed and operated with a proper
-      # multi-broker design, persistence strategy, security configuration,
-      # monitoring, backups, and upgrade process.
-
-      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
-
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 3
-    ports:
-      - "29092:29092"
-    volumes:
-      - bfstore_kafka_data:/tmp/kraft-combined-logs
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 10s
-      retries: 12
-    networks:
-      - bfstore
-
-  kafka-init:
-    image: apache/kafka:4.1.2
-    container_name: bfstore-kafka-init
-    depends_on:
-      kafka:
-        condition: service_healthy
-    entrypoint:
-      - /bin/bash
-      - -c
-      - |
-        set -euo pipefail
-
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic bfstore.order.orders.v1 --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic bfstore.inventory.stock.v1 --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic bfstore.payment.payments.v1 --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic bfstore.shipping.shipments.v1 --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic bfstore.notification.notifications.v1 --partitions 3 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic bfstore.catalog.products.v1 --partitions 3 --replication-factor 1
-
-        echo "bfstore Kafka topics created."
-    networks:
-      - bfstore
-
- 
   catalog-service:
-     build:
-       context: .
-       dockerfile: services/catalog-service/Dockerfile
-     container_name: bfstore-catalog-service
-     depends_on:
-       mysql:
-         condition: service_healthy
-       kafka:
-         condition: service_healthy
-     environment:
-       ENVIRONMENT: ${ENVIRONMENT:-local}
-       LOG_LEVEL: ${LOG_LEVEL:-debug}
-       MYSQL_HOST: mysql
-       MYSQL_PORT: 3306
-       MYSQL_DATABASE: ${CATALOG_DB_NAME:-bfstore_catalog}
-       MYSQL_USER: ${CATALOG_DB_USER:-bfstore_catalog}
-       MYSQL_PASSWORD: ${CATALOG_DB_PASSWORD:-bfstore_catalog_password}
-       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-       CATALOG_SERVICE_GRPC_PORT: ${CATALOG_SERVICE_GRPC_PORT:-50051}
-     ports:
-       - "${CATALOG_SERVICE_GRPC_PORT:-50051}:50051"
-     networks:
-       - bfstore
+    build:
+      context: .
+      dockerfile: services/catalog-service/Dockerfile
+    container_name: bfstore-catalog-service
+    depends_on:
+      mysql:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      SERVICE_VERSION: ${CATALOG_SERVICE_VERSION:-local}
+
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${CATALOG_DB_NAME:-bfstore_catalog}
+      MYSQL_USER: ${CATALOG_DB_USER:-bfstore_catalog}
+      MYSQL_PASSWORD: ${CATALOG_DB_PASSWORD:-bfstore_catalog_password}
+
+      CATALOG_SERVICE_GRPC_PORT: ${CATALOG_SERVICE_GRPC_PORT:-50051}
+      GRPC_REFLECTION_ENABLED: "true"
+
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      TRACES_ENABLED: ${TRACES_ENABLED:-true}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_EXPORT_INTERVAL: ${METRICS_EXPORT_INTERVAL:-10s}
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    ports:
+      - "${CATALOG_SERVICE_GRPC_PORT:-50051}:50051"
+    networks:
+      - bfstore
+
+  basket-service:
+    build:
+      context: .
+      dockerfile: services/basket-service/Dockerfile
+    container_name: bfstore-basket-service
+    depends_on:
+      mysql:
+        condition: service_healthy
+      catalog-service:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      SERVICE_VERSION: ${BASKET_SERVICE_VERSION:-local}
+
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${BASKET_DB_NAME:-bfstore_basket}
+      MYSQL_USER: ${BASKET_DB_USER:-bfstore_basket}
+      MYSQL_PASSWORD: ${BASKET_DB_PASSWORD:-bfstore_basket_password}
+
+      BASKET_SERVICE_GRPC_PORT: ${BASKET_SERVICE_GRPC_PORT:-50052}
+      GRPC_REFLECTION_ENABLED: "true"
+
+      # Basket Service calls Catalog Service over the internal Compose network.
+      CATALOG_GRPC_ADDR: catalog-service:50051
+      CATALOG_REQUEST_TIMEOUT: ${CATALOG_REQUEST_TIMEOUT:-2s}
+
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      TRACES_ENABLED: ${TRACES_ENABLED:-true}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_EXPORT_INTERVAL: ${METRICS_EXPORT_INTERVAL:-10s}
+      OTEL_EXPORTER_OTLP_ENDPOINT: otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    ports:
+      - "${BASKET_SERVICE_GRPC_PORT:-50052}:50052"
+    networks:
+      - bfstore
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    container_name: bfstore-otel-collector
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./deploy/local/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
@@ -121,8 +116,9 @@ services:
       - bfstore
     restart: unless-stopped
     depends_on:
-      - jaeger
-    
+      jaeger:
+        condition: service_started
+
   jaeger:
     image: jaegertracing/all-in-one:1.76.0
     container_name: bfstore-jaeger
@@ -134,7 +130,7 @@ services:
       - bfstore
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     container_name: bfstore-prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yaml"
@@ -146,10 +142,11 @@ services:
     networks:
       - bfstore
     depends_on:
-      - otel-collector
-    
+      otel-collector:
+        condition: service_started
+
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     container_name: bfstore-grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
@@ -162,7 +159,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_started
     networks:
       - bfstore
 
@@ -172,7 +170,8 @@ networks:
     driver: bridge
 
 volumes:
+  # These names intentionally remain Compose-managed so the existing Makefile
+  # volume reset target still matches docker compose -p bfstore behaviour.
   bfstore_mysql_data:
-  bfstore_kafka_data:
   bfstore_prometheus_data:
   bfstore_grafana_data:
