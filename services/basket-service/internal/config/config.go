@@ -7,14 +7,16 @@ import (
 	"time"
 )
 
-// Config contains runtime configuration for Catalogue Service.
+// Config contains runtime configuration for Basket Service.
 type Config struct {
-	Environment           string
-	LogLevel              string
-	GRPCPort              string
-	EnableGRPCReflection  bool
-	Database              DatabaseConfig
-	Telemetry             TelemetryConfig
+	Environment          string
+	LogLevel             string
+	GRPCPort             string
+	EnableGRPCReflection bool
+
+	Database  DatabaseConfig
+	Telemetry TelemetryConfig
+
 	CatalogGRPCAddress    string
 	CatalogRequestTimeout time.Duration
 }
@@ -28,7 +30,7 @@ type DatabaseConfig struct {
 	Password string
 }
 
-// TelemetryConfig contains OTLP configuration for service
+// TelemetryConfig contains OTLP configuration for the service.
 type TelemetryConfig struct {
 	Environment           string
 	ServiceVersion        string
@@ -48,6 +50,7 @@ func Load() (Config, error) {
 		GRPCPort:              getEnv("BASKET_SERVICE_GRPC_PORT", "50052"),
 		CatalogGRPCAddress:    getEnv("CATALOG_GRPC_ADDR", "localhost:50051"),
 		CatalogRequestTimeout: loadTimeEnv("CATALOG_REQUEST_TIMEOUT", "2s"),
+
 		Database: DatabaseConfig{
 			Host:     getEnv("MYSQL_HOST", "localhost"),
 			Port:     getEnv("MYSQL_PORT", "3306"),
@@ -55,11 +58,13 @@ func Load() (Config, error) {
 			User:     getEnv("MYSQL_USER", "bfstore_basket"),
 			Password: getEnv("MYSQL_PASSWORD", "bfstore_basket_password"),
 		},
+
 		EnableGRPCReflection: loadBoolEnv("GRPC_REFLECTION_ENABLED", false),
+
 		Telemetry: TelemetryConfig{
 			Environment:           getEnv("ENVIRONMENT", "local"),
 			ServiceVersion:        getEnv("SERVICE_VERSION", ""),
-			OTLPEndpoint:          getEnv("OTEL_EXPORTER_OLTP_ENDPOINT", ""), // Telemetry package config will set if absent
+			OTLPEndpoint:          getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 			OTLPInsecure:          loadBoolEnv("OTEL_EXPORTER_OTLP_INSECURE", true),
 			TelemetryEnabled:      loadBoolEnv("TELEMETRY_ENABLED", false),
 			TracesEnabled:         loadBoolEnv("TRACES_ENABLED", true),
@@ -70,6 +75,10 @@ func Load() (Config, error) {
 
 	if cfg.Database.Password == "" {
 		return Config{}, fmt.Errorf("MYSQL_PASSWORD must be set")
+	}
+
+	if cfg.CatalogRequestTimeout <= 0 {
+		return Config{}, fmt.Errorf("CATALOG_REQUEST_TIMEOUT must be a positive duration")
 	}
 
 	return cfg, nil
