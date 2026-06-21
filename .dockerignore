@@ -1,0 +1,49 @@
+# Git and editor metadata
+.git
+.gitignore
+.gitattributes
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Build output
+bin/
+dist/
+build/
+out/
+coverage/
+*.test
+*.prof
+
+# Go caches and temporary files
+**/tmp/
+**/.cache/
+**/vendor/
+
+# Node/Jekyll/blog artefacts if present in the repo
+node_modules/
+_site/
+.sass-cache/
+
+# Local database and observability data
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker artefacts
+docker-compose.override.yaml
+
+# Generated archives
+*.zip
+*.tar
+*.tar.gz
