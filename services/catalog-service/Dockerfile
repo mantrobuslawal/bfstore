@@ -1,31 +1,68 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7
 
-# Catalogue Service container image.
+# Catalog Service container image.
 #
-# This Dockerfile is intentionally simple for the first implementation stage.
-# It can be hardened later with:
-# - non-root user
-# - distroless runtime image
-# - SBOM generation
-# - vulnerability scanning
-# - build provenance
+# Build context:
+#   repo root
+#
+# Example:
+#   docker build \
+#     -f services/catalog-service/Dockerfile \
+#     --build-arg SERVICE_VERSION=0.1.0 \
+#     -t bfstore/catalog-service:0.1.0 \
+#     .
 
-FROM golang:1.25-bookworm AS build
+ARG GO_VERSION=1.26.3
+ARG DEBIAN_VERSION=12
+
+FROM golang:${GO_VERSION}-bookworm AS build
 
 WORKDIR /src
 
-COPY services/catalog-service/go.mod services/catalog-service/go.sum* ./
-RUN go mod download
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
 
-COPY services/catalog-service/ ./
+# Copy workspace and module files first to improve dependency caching.
+COPY go.work go.mod go.sum ./
+COPY services/catalog-service/go.mod services/catalog-service/go.sum ./services/catalog-service/
+COPY services/basket-service/go.mod ./services/basket-service/go.mod
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/catalog-service ./cmd/catalog-service
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download && \
+    cd services/catalog-service && go mod download
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# Copy only the source needed to build the catalog service.
+COPY gen/ ./gen/
+COPY pkg/ ./pkg/
+COPY services/catalog-service/ ./services/catalog-service/
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    cd services/catalog-service && \
+    go build \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /out/catalog-service \
+      ./cmd/catalog-service
+
+FROM gcr.io/distroless/static-debian${DEBIAN_VERSION}:nonroot AS runtime
+
+ARG SERVICE_VERSION=0.1.0
+
+LABEL org.opencontainers.image.title="bfstore catalog-service" \
+      org.opencontainers.image.description="bfstore Catalog Service gRPC API" \
+      org.opencontainers.image.version="${SERVICE_VERSION}" \
+      org.opencontainers.image.source="https://github.com/mantrobuslawal/bfstore" \
+      org.opencontainers.image.vendor="Borough Furniture Store" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /
 
-COPY --from=build /out/catalog-service /catalog-service
+COPY --from=build --chown=nonroot:nonroot /out/catalog-service /catalog-service
+
+USER nonroot:nonroot
 
 EXPOSE 50051
 
