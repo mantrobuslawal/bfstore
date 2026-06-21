@@ -8,13 +8,10 @@ import (
 
 	"github.com/XSAM/otelsql"
 	_ "github.com/go-sql-driver/mysql"
-
 	"github.com/mantrobuslawal/bfstore/services/basket-service/internal/config"
 )
 
-const (
-	baseMySQLDriverName = "mysql"
-)
+const baseMySQLDriverName = "mysql"
 
 var (
 	registerInstrumentDriverOnce   sync.Once
@@ -56,7 +53,6 @@ func instrumentedMySQLDriver() (string, error) {
 	registerInstrumentDriverOnce.Do(func() {
 		registerInstrumentedDriverName, registerInstrumentedDriverErr = otelsql.Register(baseMySQLDriverName)
 	})
-
 	if registerInstrumentedDriverErr != nil {
 		return "", registerInstrumentedDriverErr
 	}
