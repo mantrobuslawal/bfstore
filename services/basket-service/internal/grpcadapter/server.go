@@ -12,8 +12,12 @@ import (
 	"google.golang.org/grpc"
 )
 
-// NewServer creates the Catalogue Service gRPC server.
+// NewServer creates the Basket Service gRPC server.
 func NewServer(basketService *basket.Service, logger *slog.Logger) (*grpc.Server, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	requestmetricsInterceptor, err := requestmetrics.UnaryServerInterceptor(requestmetrics.Config{
 		MeterName:   "github.com/mantrobuslawal/bfstore/services/basket-service",
 		ServiceName: "basket-service",
