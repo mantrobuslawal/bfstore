@@ -55,12 +55,12 @@ func Load() (Config, error) {
 		Telemetry: TelemetryConfig{
 			Environment:           getEnv("ENVIRONMENT", "local"),
 			ServiceVersion:        getEnv("SERVICE_VERSION", ""),
-			OTLPEndpoint:          getEnv("OTEL_EXPORTER_OLTP_ENDPOINT", ""), // telemetry package config will set if absent
+			OTLPEndpoint:          getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""), // telemetry package config will set if absent
 			OTLPInsecure:          loadBoolEnv("OTEL_EXPORTER_OTLP_INSECURE", true),
 			TelemetryEnabled:      loadBoolEnv("TELEMETRY_ENABLED", false),
 			TracesEnabled:         loadBoolEnv("TRACES_ENABLED", true),
 			MetricsEnabled:        loadBoolEnv("METRICS_ENABLED", true),
-			MetricsExportInterval: loadTimeEnv("METRICS_EXPORT_INTERVAL"),
+			MetricsExportInterval: loadTimeEnv("METRICS_EXPORT_INTERVAL", "10s"),
 		},
 	}
 
@@ -108,20 +108,21 @@ func loadBoolEnv(key string, fallback bool) bool {
 	}
 }
 
-func loadTimeEnv(key string) time.Duration {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		fallback, _ := time.ParseDuration("0s")
-		return fallback
+func loadTimeEnv(key string, fallback string) time.Duration {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		value = fallback
 	}
 
-	// expecting a string number e.g. "10" or "5"
-	newValue := []string{value, "s"}
-	value = strings.Join(newValue, "")
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+
 	duration, err := time.ParseDuration(value)
 	if err != nil {
-		fallback, _ := time.ParseDuration("0s")
-		return fallback
+		return 0
 	}
+
 	return duration
 }
