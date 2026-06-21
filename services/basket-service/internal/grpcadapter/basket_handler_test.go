@@ -29,12 +29,15 @@ func (r *handlerTestRepository) CreateBasket(ctx context.Context, b basket.Baske
 	now := time.Now().UTC()
 	b.CreatedAt = now
 	b.UpdatedAt = now
+
 	if b.Status == "" {
 		b.Status = basket.BasketStatusActive
 	}
+
 	if b.Subtotal.CurrencyCode == "" {
 		b.Subtotal.CurrencyCode = "GBP"
 	}
+
 	return b, nil
 }
 
@@ -53,6 +56,7 @@ func (r *handlerTestRepository) AddItem(ctx context.Context, cmd basket.AddValid
 	r.lastAddItemCommand = cmd
 
 	now := time.Now().UTC()
+
 	return basket.Basket{
 		BasketID: basket.BasketID(cmd.BasketID),
 		Status:   basket.BasketStatusActive,
@@ -88,6 +92,7 @@ func (r *handlerTestRepository) UpdateItemQuantity(ctx context.Context, cmd bask
 	r.lastUpdateItemQuantityCommand = cmd
 
 	now := time.Now().UTC()
+
 	return basket.Basket{
 		BasketID:  basket.BasketID(cmd.BasketID),
 		Status:    basket.BasketStatusActive,
@@ -102,6 +107,7 @@ func (r *handlerTestRepository) RemoveItem(ctx context.Context, cmd basket.Remov
 	r.lastRemoveItemCommand = cmd
 
 	now := time.Now().UTC()
+
 	return basket.Basket{
 		BasketID:  basket.BasketID(cmd.BasketID),
 		Status:    basket.BasketStatusActive,
@@ -116,6 +122,7 @@ func (r *handlerTestRepository) ClearBasket(ctx context.Context, cmd basket.Clea
 	r.lastClearBasketCommand = cmd
 
 	now := time.Now().UTC()
+
 	return basket.Basket{
 		BasketID:  basket.BasketID(cmd.BasketID),
 		Status:    basket.BasketStatusActive,
@@ -154,14 +161,38 @@ func newHandlerUnderTest(repo *handlerTestRepository) *BasketHandler {
 	)
 }
 
+func mustNewBasketID(t *testing.T) string {
+	t.Helper()
+
+	id, err := basket.NewBasketID()
+	if err != nil {
+		t.Fatalf("basket.NewBasketID() error = %v, want nil", err)
+	}
+
+	return id
+}
+
+func mustNewBasketItemID(t *testing.T) string {
+	t.Helper()
+
+	id, err := basket.NewBasketItemID()
+	if err != nil {
+		t.Fatalf("basket.NewBasketItemID() error = %v, want nil", err)
+	}
+
+	return id
+}
+
 func TestBasketHandlerAddItemCallsAddItem(t *testing.T) {
 	t.Parallel()
+
+	basketID := mustNewBasketID(t)
 
 	repo := &handlerTestRepository{}
 	handler := newHandlerUnderTest(repo)
 
 	resp, err := handler.AddItem(context.Background(), &basketv1.AddItemRequest{
-		BasketId:  "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+		BasketId:  basketID,
 		ProductId: "prod_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		VariantId: "var_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 		Quantity:  2,
@@ -174,8 +205,8 @@ func TestBasketHandlerAddItemCallsAddItem(t *testing.T) {
 		t.Fatal("repository AddItem was not called through service")
 	}
 
-	if repo.lastAddItemCommand.BasketID != "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z" {
-		t.Fatalf("BasketID = %q, want request basket id", repo.lastAddItemCommand.BasketID)
+	if repo.lastAddItemCommand.BasketID != basketID {
+		t.Fatalf("BasketID = %q, want %q", repo.lastAddItemCommand.BasketID, basketID)
 	}
 
 	if repo.lastAddItemCommand.ProductID != "prod_01ARZ3NDEKTSV4RRFFQ69G5FAV" {
@@ -198,12 +229,15 @@ func TestBasketHandlerAddItemCallsAddItem(t *testing.T) {
 func TestBasketHandlerUpdateItemQuantityCallsUpdateItemQuantity(t *testing.T) {
 	t.Parallel()
 
+	basketID := mustNewBasketID(t)
+	basketItemID := mustNewBasketItemID(t)
+
 	repo := &handlerTestRepository{}
 	handler := newHandlerUnderTest(repo)
 
 	resp, err := handler.UpdateItemQuantity(context.Background(), &basketv1.UpdateItemQuantityRequest{
-		BasketId:     "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
-		BasketItemId: "bitem_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+		BasketId:     basketID,
+		BasketItemId: basketItemID,
 		Quantity:     5,
 	})
 	if err != nil {
@@ -214,8 +248,12 @@ func TestBasketHandlerUpdateItemQuantityCallsUpdateItemQuantity(t *testing.T) {
 		t.Fatal("repository UpdateItemQuantity was not called through service")
 	}
 
-	if repo.lastUpdateItemQuantityCommand.BasketItemID != "bitem_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z" {
-		t.Fatalf("BasketItemID = %q, want request basket item id", repo.lastUpdateItemQuantityCommand.BasketItemID)
+	if repo.lastUpdateItemQuantityCommand.BasketID != basketID {
+		t.Fatalf("BasketID = %q, want %q", repo.lastUpdateItemQuantityCommand.BasketID, basketID)
+	}
+
+	if repo.lastUpdateItemQuantityCommand.BasketItemID != basketItemID {
+		t.Fatalf("BasketItemID = %q, want %q", repo.lastUpdateItemQuantityCommand.BasketItemID, basketItemID)
 	}
 
 	if repo.lastUpdateItemQuantityCommand.Quantity != 5 {
@@ -230,12 +268,15 @@ func TestBasketHandlerUpdateItemQuantityCallsUpdateItemQuantity(t *testing.T) {
 func TestBasketHandlerRemoveItemCallsRemoveItem(t *testing.T) {
 	t.Parallel()
 
+	basketID := mustNewBasketID(t)
+	basketItemID := mustNewBasketItemID(t)
+
 	repo := &handlerTestRepository{}
 	handler := newHandlerUnderTest(repo)
 
 	resp, err := handler.RemoveItem(context.Background(), &basketv1.RemoveItemRequest{
-		BasketId:     "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
-		BasketItemId: "bitem_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+		BasketId:     basketID,
+		BasketItemId: basketItemID,
 	})
 	if err != nil {
 		t.Fatalf("RemoveItem() error = %v, want nil", err)
@@ -245,8 +286,12 @@ func TestBasketHandlerRemoveItemCallsRemoveItem(t *testing.T) {
 		t.Fatal("repository RemoveItem was not called through service")
 	}
 
-	if repo.lastRemoveItemCommand.BasketItemID != "bitem_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z" {
-		t.Fatalf("BasketItemID = %q, want request basket item id", repo.lastRemoveItemCommand.BasketItemID)
+	if repo.lastRemoveItemCommand.BasketID != basketID {
+		t.Fatalf("BasketID = %q, want %q", repo.lastRemoveItemCommand.BasketID, basketID)
+	}
+
+	if repo.lastRemoveItemCommand.BasketItemID != basketItemID {
+		t.Fatalf("BasketItemID = %q, want %q", repo.lastRemoveItemCommand.BasketItemID, basketItemID)
 	}
 
 	if resp.GetBasket() == nil {
@@ -257,11 +302,13 @@ func TestBasketHandlerRemoveItemCallsRemoveItem(t *testing.T) {
 func TestBasketHandlerClearBasketCallsClearBasket(t *testing.T) {
 	t.Parallel()
 
+	basketID := mustNewBasketID(t)
+
 	repo := &handlerTestRepository{}
 	handler := newHandlerUnderTest(repo)
 
 	resp, err := handler.ClearBasket(context.Background(), &basketv1.ClearBasketRequest{
-		BasketId: "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+		BasketId: basketID,
 	})
 	if err != nil {
 		t.Fatalf("ClearBasket() error = %v, want nil", err)
@@ -271,8 +318,8 @@ func TestBasketHandlerClearBasketCallsClearBasket(t *testing.T) {
 		t.Fatal("repository ClearBasket was not called through service")
 	}
 
-	if repo.lastClearBasketCommand.BasketID != "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z" {
-		t.Fatalf("BasketID = %q, want request basket id", repo.lastClearBasketCommand.BasketID)
+	if repo.lastClearBasketCommand.BasketID != basketID {
+		t.Fatalf("BasketID = %q, want %q", repo.lastClearBasketCommand.BasketID, basketID)
 	}
 
 	if resp.GetBasket() == nil {
@@ -348,6 +395,8 @@ func TestBasketHandlerRejectsNilRequests(t *testing.T) {
 func TestBasketHandlerRejectsMissingIDs(t *testing.T) {
 	t.Parallel()
 
+	validBasketID := mustNewBasketID(t)
+
 	handler := newHandlerUnderTest(&handlerTestRepository{})
 
 	tests := []struct {
@@ -376,7 +425,7 @@ func TestBasketHandlerRejectsMissingIDs(t *testing.T) {
 			name: "AddItem missing product id",
 			call: func() error {
 				_, err := handler.AddItem(context.Background(), &basketv1.AddItemRequest{
-					BasketId:  "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+					BasketId:  validBasketID,
 					VariantId: "var_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 					Quantity:  1,
 				})
@@ -387,7 +436,7 @@ func TestBasketHandlerRejectsMissingIDs(t *testing.T) {
 			name: "AddItem missing variant id",
 			call: func() error {
 				_, err := handler.AddItem(context.Background(), &basketv1.AddItemRequest{
-					BasketId:  "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+					BasketId:  validBasketID,
 					ProductId: "prod_01ARZ3NDEKTSV4RRFFQ69G5FAV",
 					Quantity:  1,
 				})
@@ -398,7 +447,7 @@ func TestBasketHandlerRejectsMissingIDs(t *testing.T) {
 			name: "UpdateItemQuantity missing item id",
 			call: func() error {
 				_, err := handler.UpdateItemQuantity(context.Background(), &basketv1.UpdateItemQuantityRequest{
-					BasketId: "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+					BasketId: validBasketID,
 					Quantity: 1,
 				})
 				return err
@@ -408,7 +457,7 @@ func TestBasketHandlerRejectsMissingIDs(t *testing.T) {
 			name: "RemoveItem missing item id",
 			call: func() error {
 				_, err := handler.RemoveItem(context.Background(), &basketv1.RemoveItemRequest{
-					BasketId: "basket_01ARZ3NDEKTSV4RRFFQ69G5FAV_QG6M8K7Z",
+					BasketId: validBasketID,
 				})
 				return err
 			},
