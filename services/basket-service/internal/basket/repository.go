@@ -16,9 +16,9 @@ type Repository interface {
 	CreateBasket(ctx context.Context, basket Basket) (Basket, error)
 	GetBasket(ctx context.Context, basketID string) (Basket, error)
 	AddItem(ctx context.Context, cmd AddValidatedItemCommand) (Basket, error)
-	UpdateItemQuantity(ctx context.Context, query BasketQuery) (Basket, error)
-	RemoveItem(ctx context.Context, query BasketQuery) (Basket, error)
-	ClearBasket(ctx context.Context, query BasketQuery) (Basket, error)
+	UpdateItemQuantity(ctx context.Context, cmd UpdateItemQuantityCommand) (Basket, error)
+	RemoveItem(ctx context.Context, cmd RemoveItemCommand) (Basket, error)
+	ClearBasket(ctx context.Context, cmd ClearBasketCommand) (Basket, error)
 }
 
 type MySQLRepository struct {
@@ -136,12 +136,12 @@ func (r *MySQLRepository) GetBasket(ctx context.Context, basketID string) (Baske
 			&basketItem.BasketID,
 			&basketItem.ProductID,
 			&basketItem.VariantID,
-			&basketItem.ProductNameSnapShot,
-			&basketItem.VariantNameSnapShot,
+			&basketItem.ProductNameSnapshot,
+			&basketItem.VariantNameSnapshot,
 			&basketItem.Quantity,
 			&basketItem.UnitPrice,
 			&basketItem.LineTotal.AmountMinor,
-			&basketItem.CurrencyCode,
+			&basketItem.UnitPrice.CurrencyCode,
 			&basketItem.AddedAt,
 			&basketItem.UpdatedAt,
 		); err != nil {
@@ -200,8 +200,8 @@ func (r *MySQLRepository) AddItem(ctx context.Context, cmd AddValidatedItemComma
 }
 
 // UpdateItemQuantity
-func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, query BasketQuery) (Basket, error) {
-	if query.Quantity < minBasketQuantity || query.Quantity > maxBasketQuantity {
+func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, cmd UpdateItemQuantityCommand) (Basket, error) {
+	if cmd.Quantity < minBasketQuantity || cmd.Quantity > maxBasketQuantity {
 		return Basket{}, ErrInvalidQuantity
 	}
 
@@ -209,8 +209,8 @@ func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, query BasketQu
 	if err != nil {
 		r.logger.ErrorContext(ctx, "failed to begin update item quantity transaction",
 			"error", err,
-			"basket_id", query.BasketID,
-			"basket_item_id", query.BasketItemID,
+			"basket_id", cmd.BasketID,
+			"basket_item_id", cmd.BasketItemID,
 		)
 
 		return Basket{}, fmt.Errorf("begin update item quantity transaction: %w", err)
@@ -225,35 +225,35 @@ func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, query BasketQu
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			r.logger.ErrorContext(ctx, "failed to roll back update item quantity transaction",
 				"error", rollbackErr,
-				"basket_id", query.BasketID,
-				"basket_item_id", query.BasketItemID,
+				"basket_id", cmd.BasketID,
+				"basket_item_id", cmd.BasketItemID,
 			)
 		}
 	}()
 
-	if _, err := r.lockBasketForUpdate(ctx, tx, query.BasketID); err != nil {
+	if _, err := r.lockBasketForUpdate(ctx, tx, cmd.BasketID); err != nil {
 		return Basket{}, err
 	}
 
-	item, err := r.lockBasketItemForUpdate(ctx, tx, query.BasketID, query.BasketItemID)
+	item, err := r.lockBasketItemForUpdate(ctx, tx, cmd.BasketID, cmd.BasketItemID)
 	if err != nil {
 		return Basket{}, err
 	}
 
-	if err := r.updateBasketItemQuantity(ctx, tx, query, item); err != nil {
+	if err := r.updateBasketItemQuantity(ctx, tx, cmd, item); err != nil {
 		return Basket{}, err
 	}
 
-	if err := r.touchBasket(ctx, tx, query.BasketID); err != nil {
+	if err := r.touchBasket(ctx, tx, cmd.BasketID); err != nil {
 		return Basket{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		r.logger.ErrorContext(ctx, "failed to commit update item quantity transaction",
 			"error", err,
-			"basket_id", query.BasketID,
-			"basket_item_id", query.BasketItemID,
-			"quantity", query.Quantity,
+			"basket_id", cmd.BasketID,
+			"basket_item_id", cmd.BasketItemID,
+			"quantity", cmd.Quantity,
 		)
 
 		return Basket{}, fmt.Errorf("commit update item quantity transaction: %w", err)
@@ -262,12 +262,12 @@ func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, query BasketQu
 	committed = true
 
 	r.logger.DebugContext(ctx, "basket item quantity updated",
-		"basket_id", query.BasketID,
-		"basket_item_id", query.BasketItemID,
-		"quantity", query.Quantity,
+		"basket_id", cmd.BasketID,
+		"basket_item_id", cmd.BasketItemID,
+		"quantity", cmd.Quantity,
 	)
 
-	updatedBasket, err := r.GetBasket(ctx, query.BasketID)
+	updatedBasket, err := r.GetBasket(ctx, cmd.BasketID)
 	if err != nil {
 		return Basket{}, fmt.Errorf("load basket after updating item quantity: %w", err)
 	}
@@ -276,13 +276,13 @@ func (r *MySQLRepository) UpdateItemQuantity(ctx context.Context, query BasketQu
 }
 
 // RemoveItem
-func (r *MySQLRepository) RemoveItem(ctx context.Context, query BasketQuery) (Basket, error) {
+func (r *MySQLRepository) RemoveItem(ctx context.Context, cmd RemoveItemCommand) (Basket, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "failed to begin remove item transaction",
 			"error", err,
-			"basket_id", query.BasketID,
-			"basket_item_id", query.BasketItemID,
+			"basket_id", cmd.BasketID,
+			"basket_item_id", cmd.BasketItemID,
 		)
 		return Basket{}, fmt.Errorf("begin remove item transaction; %w", err)
 	}
@@ -296,29 +296,29 @@ func (r *MySQLRepository) RemoveItem(ctx context.Context, query BasketQuery) (Ba
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			r.logger.ErrorContext(ctx, "failed to roll back remove item transaction",
 				"error", rollbackErr,
-				"basked_id", query.BasketID,
-				"basket_item_id", query.BasketItemID,
+				"basked_id", cmd.BasketID,
+				"basket_item_id", cmd.BasketItemID,
 			)
 		}
 	}()
 
-	if _, err := r.lockBasketForUpdate(ctx, tx, query.BasketID); err != nil {
+	if _, err := r.lockBasketForUpdate(ctx, tx, cmd.BasketID); err != nil {
 		return Basket{}, err
 	}
 
-	if err := r.deleteBasketItem(ctx, tx, query); err != nil {
+	if err := r.deleteBasketItem(ctx, tx, cmd); err != nil {
 		return Basket{}, err
 	}
 
-	if err := r.touchBasket(ctx, tx, query.BasketID); err != nil {
+	if err := r.touchBasket(ctx, tx, cmd.BasketID); err != nil {
 		return Basket{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		r.logger.ErrorContext(ctx, "failed to commit remove item transaction",
 			"error", err,
-			"basket_id", query.BasketID,
-			"basket_item_id", query.BasketItemID,
+			"basket_id", cmd.BasketID,
+			"basket_item_id", cmd.BasketItemID,
 		)
 
 		return Basket{}, fmt.Errorf("commit remove item transaction: %w", err)
@@ -327,11 +327,11 @@ func (r *MySQLRepository) RemoveItem(ctx context.Context, query BasketQuery) (Ba
 	committed = true
 
 	r.logger.DebugContext(ctx, "basket item removed",
-		"basket_id", query.BasketID,
-		"basket_item_id", query.BasketItemID,
+		"basket_id", cmd.BasketID,
+		"basket_item_id", cmd.BasketItemID,
 	)
 
-	updatedBasket, err := r.GetBasket(ctx, query.BasketID)
+	updatedBasket, err := r.GetBasket(ctx, cmd.BasketID)
 	if err != nil {
 		return Basket{}, fmt.Errorf("load basket after removing item: %w", err)
 	}
@@ -340,12 +340,12 @@ func (r *MySQLRepository) RemoveItem(ctx context.Context, query BasketQuery) (Ba
 }
 
 // ClearBasket
-func (r *MySQLRepository) ClearBasket(ctx context.Context, query BasketQuery) (Basket, error) {
+func (r *MySQLRepository) ClearBasket(ctx context.Context, cmd ClearBasketCommand) (Basket, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		r.logger.ErrorContext(ctx, "failed to begin clear basket transaction",
 			"error", err,
-			"basket_id", query.BasketID,
+			"basket_id", cmd.BasketID,
 		)
 
 		return Basket{}, fmt.Errorf("begin clear basket transaction: %w", err)
@@ -360,28 +360,28 @@ func (r *MySQLRepository) ClearBasket(ctx context.Context, query BasketQuery) (B
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			r.logger.ErrorContext(ctx, "failed to roll back clear basket transaction",
 				"error", rollbackErr,
-				"basket_id", query.BasketID,
+				"basket_id", cmd.BasketID,
 			)
 		}
 	}()
 
-	if _, err := r.lockBasketForUpdate(ctx, tx, query.BasketID); err != nil {
+	if _, err := r.lockBasketForUpdate(ctx, tx, cmd.BasketID); err != nil {
 		return Basket{}, err
 	}
 
-	deleteCount, err := r.deleteBasketItems(ctx, tx, query.BasketID)
+	deleteCount, err := r.deleteBasketItems(ctx, tx, cmd.BasketID)
 	if err != nil {
 		return Basket{}, err
 	}
 
-	if err := r.touchBasket(ctx, tx, query.BasketID); err != nil {
+	if err := r.touchBasket(ctx, tx, cmd.BasketID); err != nil {
 		return Basket{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		r.logger.ErrorContext(ctx, "failed to commit clear basket transaction",
 			"error", err,
-			"basket_id", query.BasketID,
+			"basket_id", cmd.BasketID,
 		)
 
 		return Basket{}, fmt.Errorf("commit clear basket transaction: %w", err)
@@ -390,11 +390,11 @@ func (r *MySQLRepository) ClearBasket(ctx context.Context, query BasketQuery) (B
 	commited = true
 
 	r.logger.DebugContext(ctx, "basket cleared",
-		"basket_id", query.BasketID,
+		"basket_id", cmd.BasketID,
 		"deleted_item_count", deleteCount,
 	)
 
-	updatedBasket, err := r.GetBasket(ctx, query.BasketID)
+	updatedBasket, err := r.GetBasket(ctx, cmd.BasketID)
 	if err != nil {
 		return Basket{}, fmt.Errorf("load basket after clearing: %w", err)
 	}
@@ -433,7 +433,7 @@ func (r *MySQLRepository) deleteBasketItems(
 func (r *MySQLRepository) updateBasketItemQuantity(
 	ctx context.Context,
 	tx *sql.Tx,
-	query BasketQuery,
+	query UpdateItemQuantityCommand,
 	item lockedBasketItem,
 ) error {
 	lineTotalMinorUnits := int64(query.Quantity) * item.UnitPriceMinorUnits
@@ -535,7 +535,7 @@ func (r *MySQLRepository) lockBasketItemForUpdate(
 func (r *MySQLRepository) deleteBasketItem(
 	ctx context.Context,
 	tx *sql.Tx,
-	query BasketQuery,
+	query RemoveItemCommand,
 ) error {
 	const deleteItemQuery = `
 		DELETE FROM basket_items
@@ -711,8 +711,8 @@ func (r *MySQLRepository) insertNewBasketItem(
 		cmd.BasketID,
 		cmd.ProductID,
 		cmd.VariantID,
-		cmd.ProductNameSnapShot,
-		cmd.VariantNameSnapShot,
+		cmd.ProductNameSnapshot,
+		cmd.VariantNameSnapshot,
 		cmd.Quantity,
 		cmd.UnitPrice.AmountMinor,
 		lineTotalMinorUnits,
@@ -778,8 +778,8 @@ func (r *MySQLRepository) updateExistingBasketItem(
 	`
 
 	args := []any{
-		cmd.ProductNameSnapShot,
-		cmd.VariantNameSnapShot,
+		cmd.ProductNameSnapshot,
+		cmd.VariantNameSnapshot,
 		cmd.Quantity,
 		cmd.UnitPrice.AmountMinor,
 		lineTotalMinorUnits,
