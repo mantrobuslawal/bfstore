@@ -1,3 +1,7 @@
+x-service-mysql-env: &service-mysql-env
+  MYSQL_HOST: "mysql"
+  MYSQL_PORT: "3306"
+
 services:
   mysql:
     image: mysql:8.4
@@ -10,7 +14,10 @@ services:
       - bfstore_mysql_data:/var/lib/mysql
       - ./deploy/local/mysql/init:/docker-entrypoint-initdb.d:ro
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - mysql
+          - bfstore-mysql
     healthcheck:
       test:
         [
@@ -37,12 +44,11 @@ services:
       otel-collector:
         condition: service_started
     environment:
+      <<: *service-mysql-env
       ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
       SERVICE_VERSION: ${CATALOG_SERVICE_VERSION:-local}
 
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
       MYSQL_DATABASE: ${CATALOG_DB_NAME:-bfstore_catalog}
       MYSQL_USER: ${CATALOG_DB_USER:-bfstore_catalog}
       MYSQL_PASSWORD: ${CATALOG_DB_PASSWORD:-bfstore_catalog_password}
@@ -59,7 +65,10 @@ services:
     ports:
       - "${CATALOG_SERVICE_GRPC_PORT:-50051}:50051"
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - catalog-service
+          - bfstore-catalog-service
 
   basket-service:
     build:
@@ -74,12 +83,11 @@ services:
       otel-collector:
         condition: service_started
     environment:
+      <<: *service-mysql-env
       ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
       SERVICE_VERSION: ${BASKET_SERVICE_VERSION:-local}
 
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
       MYSQL_DATABASE: ${BASKET_DB_NAME:-bfstore_basket}
       MYSQL_USER: ${BASKET_DB_USER:-bfstore_basket}
       MYSQL_PASSWORD: ${BASKET_DB_PASSWORD:-bfstore_basket_password}
@@ -100,7 +108,10 @@ services:
     ports:
       - "${BASKET_SERVICE_GRPC_PORT:-50052}:50052"
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - basket-service
+          - bfstore-basket-service
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
@@ -113,7 +124,10 @@ services:
       - "4318:4318"
       - "9464:9464"
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - otel-collector
+          - bfstore-otel-collector
     restart: unless-stopped
     depends_on:
       jaeger:
@@ -127,7 +141,10 @@ services:
     ports:
       - "16686:16686"
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - jaeger
+          - bfstore-jaeger
 
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -140,7 +157,10 @@ services:
     ports:
       - "9090:9090"
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - prometheus
+          - bfstore-prometheus
     depends_on:
       otel-collector:
         condition: service_started
@@ -162,7 +182,10 @@ services:
       prometheus:
         condition: service_started
     networks:
-      - bfstore
+      bfstore:
+        aliases:
+          - grafana
+          - bfstore-grafana
 
 networks:
   bfstore:
