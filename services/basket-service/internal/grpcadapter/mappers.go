@@ -5,37 +5,35 @@ import (
 	"time"
 
 	basketv1 "github.com/mantrobuslawal/bfstore/gen/go/bfstore/basket/v1"
-	v1 "github.com/mantrobuslawal/bfstore/gen/go/bfstore/common/v1"
+	commonv1 "github.com/mantrobuslawal/bfstore/gen/go/bfstore/common/v1"
 	"github.com/mantrobuslawal/bfstore/services/basket-service/internal/basket"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func mapBasketToProto(basket basket.Basket) (*basketv1.Basket, error) {
-	var protoItems []*basketv1.BasketItem
+func mapBasketToProto(domainBasket basket.Basket) (*basketv1.Basket, error) {
+	protoItems := make([]*basketv1.BasketItem, 0, len(domainBasket.BasketItems))
 
-	// There are cases when a basket with zero basket items will be mapped,
-	// such as when a call to ClearBasket is made. We want to avoid creating
-	// a proto basket items slice, but still want to map other basket fields.
-	if len(basket.BasketItems) > 0 {
-		protoItems = make([]*basketv1.BasketItem, 0, len(basket.BasketItems))
-		for _, item := range basket.BasketItems {
-			protoBasketItem := mapBasketItemToProto(*item)
-			protoItems = append(protoItems, protoBasketItem)
+	for _, item := range domainBasket.BasketItems {
+		if item == nil {
+			continue
 		}
+
+		protoBasketItem := mapBasketItemToProto(*item)
+		protoItems = append(protoItems, protoBasketItem)
 	}
 
-	status, err := mapBasketStatusToProto(basket.Status)
+	status, err := mapBasketStatusToProto(domainBasket.Status)
 	if err != nil {
-		return &basketv1.Basket{}, fmt.Errorf("map basket status to proto: %w", err)
+		return nil, fmt.Errorf("map basket status to proto: %w", err)
 	}
 
 	return &basketv1.Basket{
-		BasketId:  string(basket.BasketID),
-		Subtotal:  mapMoneyToProto(basket.Subtotal),
+		BasketId:  string(domainBasket.BasketID),
+		Subtotal:  mapMoneyToProto(domainBasket.Subtotal),
 		Items:     protoItems,
 		Status:    status,
-		CreatedAt: mapTimeToProto(basket.CreatedAt),
-		UpdatedAt: mapTimeToProto(basket.UpdatedAt),
+		CreatedAt: mapTimeToProto(domainBasket.CreatedAt),
+		UpdatedAt: mapTimeToProto(domainBasket.UpdatedAt),
 	}, nil
 }
 
@@ -44,8 +42,8 @@ func mapBasketItemToProto(basketItem basket.BasketItem) *basketv1.BasketItem {
 		BasketItemId:        string(basketItem.BasketItemID),
 		ProductId:           string(basketItem.ProductID),
 		VariantId:           string(basketItem.VariantID),
-		ProductNameSnapshot: basketItem.ProductNameSnapShot,
-		VariantNameSnapshot: basketItem.VariantNameSnapShot,
+		ProductNameSnapshot: basketItem.ProductNameSnapshot,
+		VariantNameSnapshot: basketItem.VariantNameSnapshot,
 		Quantity:            int32(basketItem.Quantity),
 		UnitPrice:           mapMoneyToProto(basketItem.UnitPrice),
 		LineTotal:           mapMoneyToProto(basketItem.LineTotal),
@@ -54,28 +52,33 @@ func mapBasketItemToProto(basketItem basket.BasketItem) *basketv1.BasketItem {
 	}
 }
 
-func mapMoneyToProto(money basket.Money) *v1.Money {
-	return &v1.Money{
+func mapMoneyToProto(money basket.Money) *commonv1.Money {
+	return &commonv1.Money{
 		AmountMinor:  money.AmountMinor,
 		CurrencyCode: string(money.CurrencyCode),
 	}
 }
 
-func mapTimeToProto(time time.Time) *timestamppb.Timestamp {
-	return timestamppb.New(time)
+func mapTimeToProto(value time.Time) *timestamppb.Timestamp {
+	if value.IsZero() {
+		return nil
+	}
+
+	return timestamppb.New(value)
 }
 
 func mapBasketStatusToProto(status basket.BasketStatus) (basketv1.BasketStatus, error) {
-	switch string(status) {
-	case "active":
+	switch status {
+	case basket.BasketStatusActive:
 		return basketv1.BasketStatus_BASKET_STATUS_ACTIVE, nil
-	case "checked_out":
+	case basket.BasketStatusCheckedOut:
 		return basketv1.BasketStatus_BASKET_STATUS_CHECKED_OUT, nil
-	case "cleared":
+	case basket.BasketStatusCleared:
 		return basketv1.BasketStatus_BASKET_STATUS_CLEARED, nil
-	case "expired":
+	case basket.BasketStatusExpired:
 		return basketv1.BasketStatus_BASKET_STATUS_EXPIRED, nil
 	default:
-		return basketv1.BasketStatus_BASKET_STATUS_UNSPECIFIED, fmt.Errorf("unknown basket status: %q", string(status))
+		return basketv1.BasketStatus_BASKET_STATUS_UNSPECIFIED,
+			fmt.Errorf("unknown basket status: %q", string(status))
 	}
 }
